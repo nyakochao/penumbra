@@ -28,8 +28,9 @@ use crate::error::{Error, Result};
 /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
 /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
 /// let device =
-///     DeviceBuilder::new().with_mtk_port(your_mtk_port).with_da_data(your_da_data).build()?;
+///     DeviceBuilder::default().with_mtk_port(your_mtk_port).with_da_data(your_da_data).build()?;
 /// ```
+#[derive(Default)]
 pub struct DeviceBuilder {
     /// MTK port to use during connection. It can be either a serial port or a USB port.
     /// This field is required to build a Device.
@@ -41,11 +42,6 @@ pub struct DeviceBuilder {
 }
 
 impl DeviceBuilder {
-    /// Creates a new `DeviceBuilder` instance with default settings.
-    pub fn new() -> Self {
-        Self { mtk_port: None, da_data: None }
-    }
-
     /// Assigns the MTK port to be used for the device connection.
     pub fn with_mtk_port(mut self, port: Box<dyn MTKPort>) -> Self {
         self.mtk_port = Some(port);
@@ -112,7 +108,7 @@ impl Device {
     /// use penumbra::{DeviceBuilder, find_mtk_port};
     ///
     /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
-    /// let mut device = DeviceBuilder::new().with_mtk_port(mtk_port).build()?;
+    /// let mut device = DeviceBuilder::default().with_mtk_port(mtk_port).build()?;
     ///
     /// device.init().await?;
     /// assert_eq!(device.connected, true);
@@ -172,7 +168,8 @@ impl Device {
     ///
     /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
     /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
-    /// let mut device = DeviceBuilder::new().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
     ///
     /// device.init().await?;
     /// device.enter_da_mode().await?;
@@ -322,7 +319,7 @@ impl Device {
     /// use penumbra::{DeviceBuilder, PartitionKind, find_mtk_port};
     ///
     /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
-    /// let mut device = DeviceBuilder::new().with_mtk_port(mtk_port).build()?;
+    /// let mut device = DeviceBuilder::default().with_mtk_port(mtk_port).build()?;
     ///
     /// device.init().await?;
     ///
@@ -355,7 +352,7 @@ impl Device {
     /// use penumbra::{DeviceBuilder, PartitionKind, find_mtk_port};
     ///
     /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
-    /// let mut device = DeviceBuilder::new().with_mtk_port(mtk_port).build()?;
+    /// let mut device = DeviceBuilder::default().with_mtk_port(mtk_port).build()?;
     ///
     /// device.init().await?;
     ///
@@ -398,7 +395,7 @@ impl Device {
     /// use penumbra::{DeviceBuilder, find_mtk_port};
     ///
     /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
-    /// let mut device = DeviceBuilder::new().with_mtk_port(mtk_port).build()?;
+    /// let mut device = DeviceBuilder::default().with_mtk_port(mtk_port).build()?;
     ///
     /// device.init().await?;
     /// let firmware_data = std::fs::read("logo.bin").expect("Failed to read firmware");
