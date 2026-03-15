@@ -7,5 +7,6 @@ pub mod chip;
 pub mod crypto;
 pub mod devinfo;
 pub mod emi;
+pub mod log_buffer;
 pub mod seccfg;
 pub mod storage;

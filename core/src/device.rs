@@ -13,6 +13,7 @@ use crate::connection::port::{ConnectionType, MTKPort};
 use crate::core::chip::{ChipInfo, chip_from_hw_code};
 use crate::core::crypto::config::CryptoIO;
 use crate::core::devinfo::{DevInfoData, DeviceInfo};
+use crate::core::log_buffer::DeviceLog;
 use crate::core::seccfg::LockFlag;
 use crate::core::storage::{Partition, PartitionKind};
 use crate::da::protocol::BootMode;
@@ -50,6 +51,13 @@ pub struct DeviceBuilder {
     preloader_data: Option<Vec<u8>>,
     /// Whether to enable verbose logging.
     verbose: bool,
+    /// Whether to use USB as the DA log channel instead of UART.
+    /// When enabled, DA log messages are captured into a [`DeviceLog`] buffer
+    /// instead of being sent over UART.
+    usb_log_channel: bool,
+    /// A buffer to store DA log messages when `usb_log_channel` is enabled.
+    /// This allows for capturing logs from devices without needing UART.
+    device_log: Option<DeviceLog>,
 }
 
 impl DeviceBuilder {
@@ -77,6 +85,21 @@ impl DeviceBuilder {
         self
     }
 
+    /// Enable USB logging
+    pub fn with_usb_log_channel(mut self, enabled: bool) -> Self {
+        self.usb_log_channel = enabled;
+        self
+    }
+
+    /// Assigns a [`DeviceLog`] buffer to capture DA log messages
+    /// when `usb_log_channel` is enabled.
+    /// This allows to attach an optional Callback to the log buffer
+    /// (i.e. to save to a file).
+    pub fn with_device_log(mut self, log: DeviceLog) -> Self {
+        self.device_log = Some(log);
+        self
+    }
+
     /// Builds and returns a new `Device` instance.
     pub fn build(self) -> Result<Device> {
         let connection = self.mtk_port.map(Connection::new);
@@ -84,6 +107,8 @@ impl DeviceBuilder {
         if connection.is_none() {
             return Err(Error::penumbra("MTK port must be provided to build a Device."));
         }
+
+        let device_log = self.device_log.unwrap_or_default();
 
         Ok(Device {
             dev_info: DeviceInfo::default(),
@@ -93,6 +118,8 @@ impl DeviceBuilder {
             da_data: self.da_data,
             preloader_data: self.preloader_data,
             verbose: self.verbose,
+            usb_log_channel: self.usb_log_channel,
+            device_log,
         })
     }
 }
@@ -123,6 +150,10 @@ pub struct Device {
     preloader_data: Option<Vec<u8>>,
     /// Whether verbose logging is enabled.
     verbose: bool,
+    /// Whether to log DA messages over USB.
+    usb_log_channel: bool,
+    /// Buffer to store DA log messages.
+    device_log: DeviceLog,
 }
 
 impl Device {
@@ -287,8 +318,17 @@ impl Device {
                 self.dev_info.clone(),
                 self.preloader_data.clone(),
                 self.verbose,
+                self.usb_log_channel,
+                self.device_log.clone(),
             )),
-            DAType::V6 => Box::new(Xml::new(conn, da, self.dev_info.clone(), self.verbose)),
+            DAType::V6 => Box::new(Xml::new(
+                conn,
+                da,
+                self.dev_info.clone(),
+                self.verbose,
+                self.usb_log_channel,
+                self.device_log.clone(),
+            )),
             _ => return Err(Error::penumbra("Unsupported DA type")),
         };
 
@@ -299,6 +339,11 @@ impl Device {
     /// Returns the resolved [`ChipInfo`] for this device.
     pub fn chip(&self) -> &'static ChipInfo {
         self.dev_info.chip()
+    }
+
+    /// Returns a reference to the device log buffer
+    pub fn device_log(&self) -> &DeviceLog {
+        &self.device_log
     }
 
     /// Gets a mutable reference to the active connection.

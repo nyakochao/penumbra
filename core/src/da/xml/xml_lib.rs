@@ -4,7 +4,7 @@
 */
 use std::sync::Arc;
 
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter};
 use tokio::time::{Duration, timeout};
 
@@ -12,16 +12,16 @@ use crate::VERSION;
 use crate::connection::Connection;
 use crate::core::auth::{AuthManager, SignData, SignPurpose, SignRequest};
 use crate::core::devinfo::DeviceInfo;
+use crate::core::log_buffer::DeviceLog;
 use crate::core::storage::Storage;
+use crate::da::protocol::{DataType, PacketHeader};
 use crate::da::xml::cmds::{
     CMD_END,
     CMD_START,
-    DT_PROTOCOL_FLOW,
     FileSystemOp,
     GetSysProperty,
     HOST_CMDS,
     HostSupportedCommands,
-    MAGIC,
     NotifyInitHw,
     SecurityGetDevFwInfo,
     SecuritySetFlashPolicy,
@@ -49,10 +49,19 @@ pub struct Xml {
     pub(super) write_packet_length: Option<usize>,
     pub(super) patch: bool,
     pub(super) verbose: bool,
+    pub(super) usb_log_channel: bool,
+    pub(super) device_log: DeviceLog,
 }
 
 impl Xml {
-    pub fn new(conn: Connection, da: DA, dev_info: DeviceInfo, verbose: bool) -> Self {
+    pub fn new(
+        conn: Connection,
+        da: DA,
+        dev_info: DeviceInfo,
+        verbose: bool,
+        usb_log_channel: bool,
+        device_log: DeviceLog,
+    ) -> Self {
         Xml {
             conn,
             da,
@@ -62,46 +71,60 @@ impl Xml {
             write_packet_length: None,
             patch: true,
             verbose,
+            usb_log_channel,
+            device_log,
         }
     }
 
-    /// Reads data of arbitrary length taken from the header sent by the device.
+    async fn read_next_flow_header(&mut self) -> Result<PacketHeader> {
+        loop {
+            let mut buf = [0u8; PacketHeader::SIZE];
+            timeout(Duration::from_secs(2), self.conn.read(&mut buf))
+                .await
+                .map_err(|_| Error::io("Timed out waiting for packet header"))??;
+
+            let hdr = PacketHeader::from_bytes(&buf).ok_or_else(|| {
+                debug!("[RX] Invalid packet header bytes: {:02X?}", buf);
+                Error::io(format!("Invalid packet header: {:02X?}", buf))
+            })?;
+
+            match hdr.data_type {
+                DataType::Flow => return Ok(hdr),
+                DataType::Message => self.drain_message(hdr.length).await?,
+            }
+        }
+    }
+
+    async fn drain_message(&mut self, length: u32) -> Result<()> {
+        let mut payload = vec![0u8; length as usize];
+        self.conn.read(&mut payload).await?;
+
+        let body = String::from_utf8_lossy(&payload[4..]).into_owned();
+
+        trace!("[DA Message] {}", body);
+
+        if self.usb_log_channel {
+            self.device_log.push(body);
+        }
+
+        Ok(())
+    }
+
+    /// Reads data of arbitrary length from the device.
     pub async fn read_data(&mut self) -> Result<Vec<u8>> {
-        let mut hdr = [0u8; 12];
-        self.conn.read(&mut hdr).await?;
+        let hdr = self.read_next_flow_header().await?;
 
-        let len = self.parse_header(&hdr)?;
+        debug!("[RX] Packet header received: 0x{:X} bytes", hdr.length);
 
-        let mut data = vec![0u8; len as usize];
+        let mut data = vec![0u8; hdr.length as usize];
         self.conn.read(&mut data).await?;
-
         Ok(data)
     }
 
-    pub(super) fn generate_header(&self, data: &[u8]) -> [u8; 12] {
-        let mut hdr = [0u8; 12];
-
-        // efeeeefe | 010000000 | 04000000 (Data Length)
-        hdr[0..4].copy_from_slice(&(MAGIC).to_le_bytes());
-        hdr[4..8].copy_from_slice(&(DT_PROTOCOL_FLOW).to_le_bytes());
-        hdr[8..12].copy_from_slice(&(data.len() as u32).to_le_bytes());
-
-        debug!("[TX] Data Header: {:02X?}, Data Length: {}", hdr, data.len());
-
-        hdr
-    }
-
-    pub(super) fn parse_header(&self, hdr: &[u8; 12]) -> Result<u32> {
-        let magic = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
-        let len = u32::from_le_bytes(hdr[8..12].try_into().unwrap());
-
-        if magic != MAGIC {
-            return Err(Error::io("Invalid magic"));
-        }
-
-        debug!("[RX] Data Length from Header: 0x{:X}", len);
-
-        Ok(len)
+    pub(super) fn generate_header(&self, data: &[u8]) -> [u8; PacketHeader::SIZE] {
+        let hdr = PacketHeader::new(data.len() as u32);
+        debug!("[TX] Packet header sent: 0x{:X} bytes", data.len());
+        hdr.to_bytes()
     }
 
     /// Checks for the lifetime acknowledgment (CMD:START or CMD:END).
@@ -419,6 +442,7 @@ impl Xml {
         self.conn.jump_da(addr).await?;
 
         let log_level = if self.verbose { "DEBUG" } else { "INFO" };
+        let channel = if self.usb_log_channel { "USB" } else { "UART" };
 
         xmlcmd_e!(
             self,
@@ -426,7 +450,7 @@ impl Xml {
             "NONE",
             "AUTO-DETECT",
             log_level,
-            "UART",
+            channel,
             "LINUX",
             "YES"
         )?;

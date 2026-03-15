@@ -16,6 +16,9 @@ use crate::core::storage::{Partition, PartitionKind, Storage, StorageType};
 use crate::da::{DA, DAEntryRegion};
 use crate::error::Result;
 
+/// MAGIC value for V5/V6 packets.
+pub const MAGIC: u32 = 0xFEEEEEEF;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootMode {
     Normal,
@@ -33,6 +36,71 @@ impl BootMode {
             BootMode::Test => Some("ANDROID-TEST-MODE"),
             BootMode::Normal | BootMode::HomeScreen => None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum DataType {
+    Flow = 0x1,
+    Message = 0x2,
+}
+
+impl DataType {
+    pub fn from_u32(v: u32) -> Option<Self> {
+        match v {
+            0x1 => Some(DataType::Flow),
+            0x2 => Some(DataType::Message),
+            _ => None,
+        }
+    }
+}
+
+/// 12 byte packet header shared by all packet types.
+///
+/// Format:
+/// ```text
+/// [0..4]   magic      (must be 0xFEEEEEEF)
+/// [4..8]   data_type  (1 = Flow, 2 = Message)
+/// [8..12]  length     (byte count of the payload that follows)
+/// ```
+///
+/// For `Message` packets, the payload starts with a 4 byte priority
+/// field followed by the actual message body.
+/// The length of a `Message` packet also includes the 4 byte from priority.
+#[derive(Debug, Clone, Copy)]
+pub struct PacketHeader {
+    pub magic: u32,
+    pub data_type: DataType,
+    pub length: u32,
+}
+
+impl PacketHeader {
+    pub const SIZE: usize = 12;
+
+    pub fn new(length: u32) -> Self {
+        Self { magic: MAGIC, data_type: DataType::Flow, length }
+    }
+
+    pub fn from_bytes(raw: &[u8]) -> Option<Self> {
+        if raw.len() < Self::SIZE {
+            return None;
+        }
+        let magic = u32::from_le_bytes(raw[0..4].try_into().unwrap());
+        if magic != MAGIC {
+            return None;
+        }
+        let data_type = DataType::from_u32(u32::from_le_bytes(raw[4..8].try_into().unwrap()))?;
+        let length = u32::from_le_bytes(raw[8..12].try_into().unwrap());
+        Some(Self { magic, data_type, length })
+    }
+
+    pub fn to_bytes(&self) -> [u8; Self::SIZE] {
+        let mut buf = [0u8; Self::SIZE];
+        buf[0..4].copy_from_slice(&self.magic.to_le_bytes());
+        buf[4..8].copy_from_slice(&(self.data_type as u32).to_le_bytes());
+        buf[8..12].copy_from_slice(&self.length.to_le_bytes());
+        buf
     }
 }
 

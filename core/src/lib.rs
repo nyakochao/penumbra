@@ -12,6 +12,8 @@ pub mod exploit;
 pub mod macros;
 pub mod utilities;
 
+pub use core::log_buffer::{DeviceLog, OnPush};
+
 pub use connection::port::{MTKPort, find_mtk_port};
 pub use device::{Device, DeviceBuilder};
 

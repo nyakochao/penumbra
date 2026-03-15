@@ -12,7 +12,9 @@ use crate::connection::port::ConnectionType;
 use crate::core::auth::{AuthManager, SignData, SignPurpose, SignRequest};
 use crate::core::devinfo::DeviceInfo;
 use crate::core::emi::extract_emi_settings;
+use crate::core::log_buffer::DeviceLog;
 use crate::core::storage::Storage;
+use crate::da::protocol::{DataType, PacketHeader};
 use crate::da::xflash::cmds::*;
 #[cfg(not(feature = "no_exploits"))]
 use crate::da::xflash::exts::boot_extensions;
@@ -31,6 +33,8 @@ pub struct XFlash {
     pub(super) write_packet_length: Option<usize>,
     pub(super) patch: bool,
     pub(super) verbose: bool,
+    pub(super) usb_log_channel: bool,
+    pub(super) device_log: DeviceLog,
 }
 
 impl XFlash {
@@ -46,6 +50,8 @@ impl XFlash {
         dev_info: DeviceInfo,
         pl: Option<Vec<u8>>,
         verbose: bool,
+        usb_log_channel: bool,
+        device_log: DeviceLog,
     ) -> Self {
         XFlash {
             conn,
@@ -57,6 +63,8 @@ impl XFlash {
             write_packet_length: None,
             patch: true,
             verbose,
+            usb_log_channel,
+            device_log,
         }
     }
 
@@ -78,19 +86,51 @@ impl XFlash {
         read
     }
 
+    async fn read_next_flow_header(&mut self) -> Result<PacketHeader> {
+        loop {
+            let mut buf = [0u8; PacketHeader::SIZE];
+            timeout(Duration::from_secs(2), self.conn.read(&mut buf))
+                .await
+                .map_err(|_| Error::io("Timed out waiting for packet header"))??;
+
+            let hdr = PacketHeader::from_bytes(&buf).ok_or_else(|| {
+                debug!("[RX] Invalid packet header bytes: {:02X?}", buf);
+                Error::io(format!("Invalid packet header: {:02X?}", buf))
+            })?;
+
+            match hdr.data_type {
+                DataType::Flow => return Ok(hdr),
+                DataType::Message => self.drain_message(hdr.length).await?,
+            }
+        }
+    }
+
+    async fn drain_message(&mut self, length: u32) -> Result<()> {
+        let mut payload = vec![0u8; length as usize];
+        self.conn.read(&mut payload).await?;
+
+        let body = String::from_utf8_lossy(&payload[4..]).into_owned();
+
+        trace!("[DA Message] {}", body);
+
+        if self.usb_log_channel {
+            self.device_log.push(body);
+        }
+
+        Ok(())
+    }
+
     // When called after calling a cmd that returns a status too,
     // call status_ok!() macro manually.
     // This function only reads the data, and cannot be used to read status,
     // or functions like read_flash will fail.
     pub async fn read_data(&mut self) -> Result<Vec<u8>> {
-        let mut hdr = [0u8; 12];
-        self.conn.read(&mut hdr).await?;
+        let hdr = self.read_next_flow_header().await?;
 
-        let len = self.parse_header(&hdr)?;
+        debug!("[RX] Packet header received: 0x{:X} bytes", hdr.length);
 
-        let mut data = vec![0u8; len as usize];
+        let mut data = vec![0u8; hdr.length as usize];
         self.conn.read(&mut data).await?;
-
         Ok(data)
     }
 
@@ -139,9 +179,13 @@ impl XFlash {
             2 // INFO
         };
 
+        // Force logs through UART regardless.
+        // For some reason, as the error mentioned above, the DA just hangs if we set logs
+        // through USB, regardless of the bootup mode.
+        // TODO: Figure out why!
         let env_params: [u32; 5] = [
             da_log_level, // da_log_level
-            1,            // log_channel = UART
+            1,            // log_channel = 1: UART, 2: Usb, 3: Both
             1,            // system_os = OS_LINUX
             0,            // ufs_provision
             0,            // reserved
@@ -317,7 +361,7 @@ impl XFlash {
 
         // efeeeefe | 010000000 | 04000000 (Data Length)
         hdr[0..4].copy_from_slice(&(Cmd::Magic as u32).to_le_bytes());
-        hdr[4..8].copy_from_slice(&(DataType::ProtocolFlow as u32).to_le_bytes());
+        hdr[4..8].copy_from_slice(&(DataType::Flow as u32).to_le_bytes());
         hdr[8..12].copy_from_slice(&(data.len() as u32).to_le_bytes());
 
         debug!("[TX] Data Header: {:02X?}, Data Length: {}", hdr, data.len());

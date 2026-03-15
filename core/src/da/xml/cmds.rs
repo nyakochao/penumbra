@@ -6,8 +6,6 @@ use std::collections::BTreeMap;
 
 use xmlcmd_derive::XmlCommand;
 
-/// MAGIC value for protocol communication
-pub const MAGIC: u32 = 0xFEEEEEEF;
 /// Each header contains this, to identify the DataType.
 /// V6 doesn't seem to use anything other than this.
 pub const DT_PROTOCOL_FLOW: u32 = 0x1;
