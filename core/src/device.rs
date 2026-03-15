@@ -793,6 +793,43 @@ impl Device {
         let protocol = self.protocol.as_mut().unwrap();
         protocol.peek(addr, size, writer, progress).await
     }
+
+    /// Writes memory to the device at the given address and size.
+    /// The data is read from the provided `reader` as it is written..
+    ///
+    /// Only available when the `no_exploits` feature is **not** enabled.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use penumbra::{DeviceBuilder, find_mtk_port};
+    /// use tokio::fs::File;
+    /// use tokio::io::BufWriter;
+    ///
+    /// let mtk_port = find_mtk_port().await.ok_or("No MTK port found")?;
+    /// let da_data = std::fs::read("path/to/da/file").expect("Failed to read DA file");
+    /// let mut device =
+    ///     DeviceBuilder::default().with_mtk_port(mtk_port).with_da_data(da_data).build()?;
+    ///
+    /// device.init().await?;
+    /// let file = File::create("dump.bin").await?;
+    /// let mut reader = BufReader::new(file);
+    /// let mut progress = |_read: usize, _total: usize| {};
+    /// device.poke(0x0010_0000, 0x1000, &mut reader, &mut progress).await?;
+    /// ```
+    #[cfg(not(feature = "no_exploits"))]
+    pub async fn poke(
+        &mut self,
+        addr: u32,
+        size: usize,
+        reader: &mut (dyn AsyncRead + Unpin + Send),
+        progress: &mut (dyn FnMut(usize, usize) + Send),
+    ) -> Result<()> {
+        self.ensure_da_mode().await?;
+
+        let protocol = self.protocol.as_mut().unwrap();
+        protocol.poke(addr, size, reader, progress).await
+    }
+
 }
 
 #[async_trait::async_trait]

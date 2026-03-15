@@ -1,26 +1,48 @@
 /*
-    SPDX-License-Identifier: GPL-3.0-or-later
-    SPDX-FileCopyrightText: 2025 Shomy
-
-    Derived from:
-    https://github.com/bkerler/mtkclient/blob/main/mtkclient/Library/DA/xflash/extension/xflash.py
-    Original SPDX-License-Identifier: GPL-3.0-or-later
-    Original SPDX-FileCopyrightText: 2018–2024 bkerler
-
-    This file remains under the GPL-3.0-or-later license.
-    However, as part of a larger project licensed under the AGPL-3.0-or-later,
-    the combined work is subject to the networking terms of the AGPL-3.0-or-later,
-    as for term 13 of the GPL-3.0-or-later license.
+    SPDX-License-Identifier: AGPL-3.0-or-later
+    SPDX-FileCopyrightText: 2026 Shomy
 */
+use std::io::Cursor;
+
 use log::{debug, info};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::da::DAProtocol;
 use crate::da::xflash::{Cmd, XFlash};
 use crate::error::{Error, Result};
-use crate::utilities::patching::{HEX_NOT_FOUND, find_pattern, patch_ptr};
-use crate::{extract_ptr, le_u32};
+use crate::le_u32;
+use crate::utilities::analysis::{Arch, create_analyzer};
+use crate::utilities::patching::{bytes_to_hex, patch_pattern_str};
 
 const DA_EXT: &[u8] = include_bytes!("../../../payloads/da_x.bin");
+#[repr(C)]
+struct DACtx {
+    sej_base: u32,
+    tzcc_base: u32,
+    da2_base: u32,
+    da2_size: u32,
+    write_pkt_len: u32,
+    read_pkt_len: u32,
+    storage_type: u32,
+    usb_log: u32,
+}
+
+impl DACtx {
+    pub fn to_bytes(&self) -> [u8; 32] {
+        let mut out = [0u8; 32];
+
+        out[0..4].copy_from_slice(&self.sej_base.to_le_bytes());
+        out[4..8].copy_from_slice(&self.tzcc_base.to_le_bytes());
+        out[8..12].copy_from_slice(&self.da2_base.to_le_bytes());
+        out[12..16].copy_from_slice(&self.da2_size.to_le_bytes());
+        out[16..20].copy_from_slice(&self.write_pkt_len.to_le_bytes());
+        out[20..24].copy_from_slice(&self.read_pkt_len.to_le_bytes());
+        out[24..28].copy_from_slice(&self.storage_type.to_le_bytes());
+        out[28..32].copy_from_slice(&self.usb_log.to_le_bytes());
+
+        out
+    }
+}
 
 pub async fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
     debug!("Trying booting XFlash extensions...");
@@ -36,7 +58,7 @@ pub async fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
     let ext_addr = 0x68000000;
     let ext_size = ext_data.len() as u32;
 
-    info!("Uploading DA extensions to {:08X} ({} bytes)", ext_addr, ext_size);
+    info!("Uploading DA extensions to 0x{:08X} (0x{:X} bytes)", ext_addr, ext_size);
     match xflash.boot_to(ext_addr, &ext_data).await {
         Ok(_) => {}
         // If DA extensions fail to upload, we just return false, not a fatal error
@@ -48,113 +70,83 @@ pub async fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
     info!("DA extensions uploaded");
 
     let ack = xflash.devctrl(Cmd::ExtAck, None).await?;
-
-    // Ack must be 0xA1A2A3A4
-    if ack.len() < 4 || ack[0..4] != [0xA4, 0xA3, 0xA2, 0xA1] {
-        return Err(Error::proto("DA extensions failed to start (invalid ACK)"));
-    } else {
-        info!("Received ack: {:02X?}", &ack[0..4]);
+    if ack.len() < 4 || le_u32!(ack, 0) != 0 {
+        info!("DA extensions ACK failed, continuing without extensions");
+        return Ok(false);
     }
+
+    let sej_base = xflash.chip().sej_base();
+    let tzcc_base = xflash.chip().tzcc_base();
+    let da2_base = xflash.da.get_da2().map(|da2| da2.addr).unwrap_or(0);
+    let da2_size = xflash.da.get_da2().map(|da2| da2.data.len() as u32).unwrap_or(0);
+    let storage_type = xflash.get_storage_type().await as u32;
+    let read_pkt_len = xflash.read_packet_length.unwrap_or(0x100) as u32;
+    let write_pkt_len = xflash.write_packet_length.unwrap_or(0x100) as u32;
+    let usb_log = xflash.usb_log_channel as u32;
+
+    let ctx = DACtx {
+        sej_base,
+        tzcc_base,
+        da2_base,
+        da2_size,
+        write_pkt_len,
+        read_pkt_len,
+        storage_type,
+        usb_log,
+    };
+
+    xflash.devctrl(Cmd::ExtSetupDaCtx, Some(&[&ctx.to_bytes()])).await?;
 
     Ok(true)
 }
 
 fn prepare_extensions(xflash: &XFlash) -> Option<Vec<u8>> {
     let da2 = &xflash.da.get_da2()?.data;
-    let da2address = xflash.da.get_da2()?.addr;
+    let da2address = xflash.da.get_da2()?.addr as u64;
 
     let mut da_ext_data = DA_EXT.to_vec();
 
-    // This allows to register DA Extensions custom commands (0x0F000X)
-    let register_devctrl = find_pattern(da2, "38B505460C20", 0);
-    if register_devctrl == HEX_NOT_FOUND {
-        return None;
-    }
+    let analyzer = create_analyzer(da2.clone(), da2address, Arch::Thumb2);
 
-    let mmc_get_card = {
-        let pos = find_pattern(da2, "4B4FF43C72", 0);
-        if pos != HEX_NOT_FOUND {
-            pos.saturating_sub(1)
-        } else {
-            let pos = find_pattern(da2, "A3EB0013181A02EB0010", 0);
-            if pos != HEX_NOT_FOUND {
-                pos.saturating_sub(10)
-            } else {
-                return None;
-            }
-        }
-    };
+    let off = analyzer.find_function_from_string("allocation was %zd bytes long at ptr %p\n")?;
+    let free = analyzer.offset_to_va(off)? as u32;
 
-    let mut mmc_set_part_config = HEX_NOT_FOUND;
-    let mut search_offset = 0;
+    debug!("Found free at 0x{:08X}", free);
 
-    while search_offset < da2.len() {
-        let pos = find_pattern(da2, "C3690A4610B5", search_offset);
-        if pos == HEX_NOT_FOUND {
-            break;
-        }
+    // kernel main
+    let off = analyzer.find_string_xref("\n***10.dagent_register_commands.\n")?;
+    let off = analyzer.get_next_bl_from_off(off + 6)?; // Skip dprintf
+    let off = analyzer.get_bl_target(off)?;
+    let off = analyzer.va_to_offset(off)?;
+    // + 0x20 to account of the extloader just in case
+    let off = analyzer.get_next_bl_from_off(off as usize)?;
+    let reg_devc = analyzer.get_bl_target(off)? as u32 | 1;
 
-        if pos + 22 <= da2.len() && da2[pos + 20] == 0xB3 && da2[pos + 21] == 0x21 {
-            mmc_set_part_config = pos;
-            break;
-        }
+    debug!("Found register_device_ctrl at 0x{:08X}", reg_devc);
 
-        search_offset = pos + 1;
-    }
+    let off = analyzer.va_to_offset(reg_devc as u64)?;
+    let off = analyzer.get_next_bl_from_off(off)?;
+    let malloc = analyzer.get_bl_target(off)? as u32 | 1;
 
-    if mmc_set_part_config == HEX_NOT_FOUND {
-        mmc_set_part_config = find_pattern(da2, "C36913F00103", 0);
-    }
+    debug!("Found malloc at 0x{:08X}", malloc);
 
-    let mut mmc_rpmb_send_command = find_pattern(da2, "F8B506469DF81850", 0);
-    if mmc_rpmb_send_command == HEX_NOT_FOUND {
-        mmc_rpmb_send_command = find_pattern(da2, "2DE9F0414FF6FD74", 0);
-    }
+    let off = analyzer.find_function_from_string("%s, mmc_set_part_config done!!\n")?;
+    let off = analyzer.get_next_bl_from_off(off)?; // Skip dprintf
 
-    let ufs_patterns =
-        [("20460BB0BDE8F08300BF", 10), ("20460DB0BDE8F083", 8), ("214602F002FB1BE600BF", 18)];
+    let off = analyzer.get_bl_target(off)?;
+    let mmc_get_card = off as u32 | 1;
 
-    let mut g_ufs_hba = 0;
+    debug!("Found mmc_get_card at 0x{:08X}", mmc_get_card);
 
-    for (pattern, offset) in ufs_patterns {
-        let pos = find_pattern(da2, pattern, 0);
-        if pos != HEX_NOT_FOUND && pos + offset + 4 <= da2.len() {
-            g_ufs_hba = extract_ptr!(u32, da2, pos + offset);
-            break;
-        }
-    }
+    let uart_base = xflash.chip().uart() as u32;
 
-    let has_ufs = g_ufs_hba != 0;
+    debug!("UART base address at 0x{:X}", uart_base);
 
-    let ufs_tag_pos = if has_ufs { find_pattern(da2, "B52EB190F8", 0) } else { HEX_NOT_FOUND };
-
-    let ufs_queue_pos = if has_ufs { find_pattern(da2, "2DE9F8430127", 0) } else { HEX_NOT_FOUND };
-
-    // Actual patching starts here
-    let register_ptr = find_pattern(&da_ext_data, "11111111", 0);
-    let mmc_get_card_ptr = find_pattern(&da_ext_data, "22222222", 0);
-    let mmc_set_part_config_ptr = find_pattern(&da_ext_data, "33333333", 0);
-    let mmc_rpmb_send_command_ptr = find_pattern(&da_ext_data, "44444444", 0);
-    let ufshcd_queuecommand_ptr = find_pattern(&da_ext_data, "55555555", 0);
-    let ufshcd_get_free_tag_ptr = find_pattern(&da_ext_data, "66666666", 0);
-    let ptr_g_ufs_hba_ptr = find_pattern(&da_ext_data, "77777777", 0);
-    // let efuse_addr_ptr = find_pattern(&da_ext_data, "88888888", 0);
-
-    let patches = [
-        (register_ptr, register_devctrl),
-        (mmc_get_card_ptr, mmc_get_card),
-        (mmc_set_part_config_ptr, mmc_set_part_config),
-        (mmc_rpmb_send_command_ptr, mmc_rpmb_send_command),
-        (ufshcd_queuecommand_ptr, ufs_queue_pos),
-        (ufshcd_get_free_tag_ptr, ufs_tag_pos),
-        (ptr_g_ufs_hba_ptr, g_ufs_hba as usize),
-    ];
-
-    for (offset, value) in patches {
-        if offset != HEX_NOT_FOUND && value != HEX_NOT_FOUND {
-            patch_ptr(&mut da_ext_data, offset, value as u32, da2address, true);
-        }
-    }
+    patch_pattern_str(&mut da_ext_data, "11111111", &bytes_to_hex(&reg_devc.to_le_bytes()));
+    patch_pattern_str(&mut da_ext_data, "22222222", &bytes_to_hex(&malloc.to_le_bytes()));
+    patch_pattern_str(&mut da_ext_data, "33333333", &bytes_to_hex(&free.to_le_bytes()));
+    patch_pattern_str(&mut da_ext_data, "44444444", &bytes_to_hex(&mmc_get_card.to_le_bytes()));
+    patch_pattern_str(&mut da_ext_data, "00200011", &bytes_to_hex(&uart_base.to_le_bytes()))?;
 
     Some(da_ext_data)
 }
@@ -193,9 +185,15 @@ pub async fn sej(
     params[3] = if xor { 1 } else { 0 };
     params[4..8].copy_from_slice(&(data.len() as u32).to_le_bytes());
 
-    xflash.devctrl(Cmd::ExtSej, Some(&[&params, data])).await?;
+    xflash.devctrl(Cmd::ExtSej, Some(&[&params])).await?;
 
-    let payload = xflash.read_data().await?;
+    let mut reader = Cursor::new(data);
+    let mut payload = vec![0u8; data.len()];
+    let mut writer = Cursor::new(&mut payload);
+
+    xflash.download_data(data.len(), &mut reader, &mut |_, _| {}).await?;
+    xflash.upload_data(data.len(), &mut writer, &mut |_, _| {}).await?;
+
     status_ok!(xflash);
 
     Ok(payload)
