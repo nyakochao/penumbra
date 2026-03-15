@@ -61,6 +61,7 @@ mtk_commands! {
     Seccfg(SeccfgArgs),
     Pgpt(PgptArgs),
     Peek(PeekArgs),
+    Poke(PokeArgs),
     Shutdown(ShutdownArgs),
     Reboot(RebootArgs),
     XFlash(XFlashArgs),
