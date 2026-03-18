@@ -11,6 +11,8 @@ This is the documentation for both Penumbra and my researches and knowledge abou
 ---
 ## 📚 Useful pages
 
+* [[FAQ]]
 * [[Carbonara|Carbonara exploit]]
+* [[Heapbait|HeapB8]]
 * [[Download Agent]]
 * [[Seccfg|SECCFG]]
