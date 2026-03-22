@@ -102,10 +102,18 @@ pub async fn erase_flash(
     param[8..16].copy_from_slice(&addr.to_le_bytes());
     param[16..24].copy_from_slice(&(size as u64).to_le_bytes());
 
+    xflash.send_cmd(Cmd::DeviceCtrl).await?;
+    xflash.send_cmd(Cmd::StartDlInfo).await?;
+    status_ok!(xflash);
+
     xflash.send_cmd(Cmd::Format).await?;
     xflash.send(&param).await?;
 
     xflash.progress_report(size, progress).await?;
+
+    xflash.send_cmd(Cmd::DeviceCtrl).await?;
+    xflash.send_cmd(Cmd::EndDlInfo).await?;
+    status_ok!(xflash);
 
     info!("Flash erase completed.");
     Ok(())
@@ -187,6 +195,10 @@ pub async fn format(
         }
     };
 
+    xflash.send_cmd(Cmd::DeviceCtrl).await?;
+    xflash.send_cmd(Cmd::StartDlInfo).await?;
+    status_ok!(xflash);
+
     xflash.send_cmd(Cmd::FormatPartition).await?;
     // The device starts sending statuses right after sending the partition name,
     // because MTK forgot to put a status write after the command :/
@@ -198,6 +210,10 @@ pub async fn format(
     info!("Formatting partition '{}'", part_name);
 
     xflash.progress_report(part.size, progress).await?;
+
+    xflash.send_cmd(Cmd::DeviceCtrl).await?;
+    xflash.send_cmd(Cmd::EndDlInfo).await?;
+    status_ok!(xflash);
 
     info!("Partition '{}' formatted.", part_name);
     Ok(())
