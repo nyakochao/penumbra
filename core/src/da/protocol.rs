@@ -7,6 +7,7 @@ use std::sync::Arc;
 use downcast_rs::{DowncastSend, impl_downcast};
 use tokio::io::{AsyncRead, AsyncWrite};
 
+use crate::DeviceLog;
 use crate::connection::Connection;
 use crate::connection::port::ConnectionType;
 use crate::core::chip::ChipInfo;
@@ -102,6 +103,15 @@ impl PacketHeader {
         buf[8..12].copy_from_slice(&self.length.to_le_bytes());
         buf
     }
+}
+
+pub struct DAProtocolParams {
+    pub da: DA,
+    pub devinfo: DeviceInfo,
+    pub device_log: DeviceLog,
+    pub verbose: bool,
+    pub usb_log_channel: bool,
+    pub preloader: Option<Vec<u8>>, // TODO: Switch to Preloader type
 }
 
 #[async_trait::async_trait]

@@ -16,7 +16,7 @@ use crate::core::devinfo::{DevInfoData, DeviceInfo};
 use crate::core::log_buffer::DeviceLog;
 use crate::core::seccfg::LockFlag;
 use crate::core::storage::{Partition, PartitionKind, RpmbRegion};
-use crate::da::protocol::BootMode;
+use crate::da::protocol::{BootMode, DAProtocolParams};
 use crate::da::{DAFile, DAProtocol, DAType, XFlash, Xml};
 use crate::error::{Error, Result};
 
@@ -311,24 +311,20 @@ impl Device {
             Error::penumbra(format!("No compatible DA for hardware code 0x{:04X}", hw_code))
         })?;
 
-        let protocol: Box<dyn DAProtocol + Send> = match da.da_type {
-            DAType::V5 => Box::new(XFlash::new(
-                conn,
-                da,
-                self.dev_info.clone(),
-                self.preloader_data.clone(),
-                self.verbose,
-                self.usb_log_channel,
-                self.device_log.clone(),
-            )),
-            DAType::V6 => Box::new(Xml::new(
-                conn,
-                da,
-                self.dev_info.clone(),
-                self.verbose,
-                self.usb_log_channel,
-                self.device_log.clone(),
-            )),
+        let da_type = da.da_type.clone();
+
+        let params = DAProtocolParams {
+            da,
+            devinfo: self.dev_info.clone(),
+            device_log: self.device_log.clone(),
+            verbose: self.verbose,
+            usb_log_channel: self.usb_log_channel,
+            preloader: self.preloader_data.clone(),
+        };
+
+        let protocol: Box<dyn DAProtocol + Send> = match da_type {
+            DAType::V5 => Box::new(XFlash::new(conn, params)),
+            DAType::V6 => Box::new(Xml::new(conn, params)),
             _ => return Err(Error::penumbra("Unsupported DA type")),
         };
 

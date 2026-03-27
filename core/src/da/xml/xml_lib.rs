@@ -14,7 +14,7 @@ use crate::core::auth::{AuthManager, SignData, SignPurpose, SignRequest};
 use crate::core::devinfo::DeviceInfo;
 use crate::core::log_buffer::DeviceLog;
 use crate::core::storage::Storage;
-use crate::da::protocol::{DataType, PacketHeader};
+use crate::da::protocol::{DAProtocolParams, DataType, PacketHeader};
 use crate::da::xml::cmds::{
     CMD_END,
     CMD_START,
@@ -54,25 +54,18 @@ pub struct Xml {
 }
 
 impl Xml {
-    pub fn new(
-        conn: Connection,
-        da: DA,
-        dev_info: DeviceInfo,
-        verbose: bool,
-        usb_log_channel: bool,
-        device_log: DeviceLog,
-    ) -> Self {
+    pub fn new(conn: Connection, params: DAProtocolParams) -> Self {
         Xml {
             conn,
-            da,
-            dev_info,
+            da: params.da,
+            dev_info: params.devinfo,
             using_exts: false,
             read_packet_length: None,
             write_packet_length: None,
             patch: true,
-            verbose,
-            usb_log_channel,
-            device_log,
+            verbose: params.verbose,
+            usb_log_channel: params.usb_log_channel,
+            device_log: params.device_log,
         }
     }
 

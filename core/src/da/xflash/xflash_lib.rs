@@ -15,7 +15,7 @@ use crate::core::devinfo::DeviceInfo;
 use crate::core::emi::extract_emi_settings;
 use crate::core::log_buffer::DeviceLog;
 use crate::core::storage::Storage;
-use crate::da::protocol::{DataType, PacketHeader};
+use crate::da::protocol::{DAProtocolParams, DataType, PacketHeader};
 use crate::da::xflash::cmds::*;
 #[cfg(not(feature = "no_exploits"))]
 use crate::da::xflash::exts::boot_extensions;
@@ -45,27 +45,19 @@ impl XFlash {
         self.send(&cmd_bytes[..]).await
     }
 
-    pub fn new(
-        conn: Connection,
-        da: DA,
-        dev_info: DeviceInfo,
-        pl: Option<Vec<u8>>,
-        verbose: bool,
-        usb_log_channel: bool,
-        device_log: DeviceLog,
-    ) -> Self {
+    pub fn new(conn: Connection, params: DAProtocolParams) -> Self {
         XFlash {
             conn,
-            da,
-            pl,
-            dev_info,
+            da: params.da,
+            pl: params.preloader,
+            dev_info: params.devinfo,
             using_exts: false,
             read_packet_length: None,
             write_packet_length: None,
             patch: true,
-            verbose,
-            usb_log_channel,
-            device_log,
+            verbose: params.verbose,
+            usb_log_channel: params.usb_log_channel,
+            device_log: params.device_log,
         }
     }
 
