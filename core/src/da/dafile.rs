@@ -12,7 +12,7 @@ use crate::{le_u16, le_u32};
 /// - Legacy: Old DA, used in old devices
 /// - V5 (XFlash): Used mainly in early Dimensity devices and most Helio devices
 /// - V6 (XML): Newest protocol, used in most recent Dimensity and Helio devices
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DAType {
     Legacy,
     V5,
@@ -105,7 +105,7 @@ impl DAFile {
             let start = 0x6C + (i as usize * da_entry_size);
             let end = start + da_entry_size;
             let da_entry = &raw_data[start..end];
-            let mut inner_da_type = da_type.clone();
+            let mut inner_da_type = da_type;
 
             // For each DA, we parse its header entry
             let magic = le_u16!(da_entry, 0x00);
@@ -279,10 +279,10 @@ impl DA {
         // Since even the shortest hash is 16 bytes, we start scanning after that point
         // and look for a delimiter (8 consecutive null bytes) to determine where the hash ends.
         let hash_len = data[16..]
-        .windows(8)
-        .position(|w| w.iter().all(|&b| b == 0))
-        .map(|pos| pos + 16)
-        .unwrap_or(data.len());
+            .windows(8)
+            .position(|w| w.iter().all(|&b| b == 0))
+            .map(|pos| pos + 16)
+            .unwrap_or(data.len());
 
         match hash_len {
             16 => HashType::Md5,
