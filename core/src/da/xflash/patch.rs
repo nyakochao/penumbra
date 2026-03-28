@@ -30,7 +30,7 @@ pub fn patch_da(xflash: &mut XFlash) -> Result<DA> {
 
             let original_da = &xflash.da;
             let da = DA {
-                da_type: xflash.da.da_type.clone(),
+                da_type: xflash.da.da_type,
                 regions: vec![original_da.regions[0].clone(), da1.clone(), da2.clone()],
                 magic: original_da.magic,
                 hw_code: original_da.hw_code,

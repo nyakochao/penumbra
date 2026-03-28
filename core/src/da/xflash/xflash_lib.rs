@@ -20,7 +20,7 @@ use crate::da::xflash::cmds::*;
 #[cfg(not(feature = "no_exploits"))]
 use crate::da::xflash::exts::boot_extensions;
 use crate::da::xflash::storage::detect_storage;
-use crate::da::{DA, DAProtocol};
+use crate::da::{DA, DownloadProtocol};
 use crate::error::{Error, Result, XFlashError};
 use crate::le_u32;
 

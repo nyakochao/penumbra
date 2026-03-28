@@ -34,7 +34,7 @@ use crate::da::xml::cmds::{
 #[cfg(not(feature = "no_exploits"))]
 use crate::da::xml::exts::boot_extensions;
 use crate::da::xml::storage::detect_storage;
-use crate::da::{DA, DAProtocol};
+use crate::da::{DA, DownloadProtocol};
 use crate::error::{Error, Result, XmlError, XmlErrorKind};
 use crate::utilities::xml::{get_tag, get_tag_usize};
 

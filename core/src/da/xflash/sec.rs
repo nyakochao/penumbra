@@ -6,7 +6,7 @@ use std::io::Cursor;
 
 use crate::core::seccfg::{SecCfgV4, SecCfgV4Algo};
 use crate::da::xflash::exts::sej;
-use crate::da::{DAProtocol, XFlash};
+use crate::da::{DownloadProtocol, XFlash};
 
 pub async fn parse_seccfg(xflash: &mut XFlash) -> Option<SecCfgV4> {
     let seccfg = xflash.dev_info.get_partition("seccfg").await?;

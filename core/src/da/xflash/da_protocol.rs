@@ -31,14 +31,14 @@ use crate::da::xflash::flash;
 use crate::da::xflash::patch;
 #[cfg(not(feature = "no_exploits"))]
 use crate::da::xflash::sec::{parse_seccfg, write_seccfg};
-use crate::da::{DA, DAEntryRegion, DAProtocol, XFlash};
+use crate::da::{DA, DAEntryRegion, DownloadProtocol, XFlash};
 use crate::error::{Error, Result, XFlashError};
 #[cfg(not(feature = "no_exploits"))]
 use crate::exploit::{Carbonara, Exploit, Kamakiri};
 use crate::{exploit, le_u32};
 
 #[async_trait::async_trait]
-impl DAProtocol for XFlash {
+impl DownloadProtocol for XFlash {
     async fn upload_da(&mut self) -> Result<bool> {
         exploit!(Kamakiri, self);
 

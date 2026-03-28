@@ -7,6 +7,6 @@ pub mod protocol;
 pub mod xflash;
 pub mod xml;
 pub use dafile::{DA, DAEntryRegion, DAFile, DAType};
-pub use protocol::DAProtocol;
+pub use protocol::{DAProtocol, DAProtocolParams, DownloadProtocol};
 pub use xflash::XFlash;
 pub use xml::Xml;

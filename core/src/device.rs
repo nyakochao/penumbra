@@ -17,7 +17,7 @@ use crate::core::log_buffer::DeviceLog;
 use crate::core::seccfg::LockFlag;
 use crate::core::storage::{Partition, PartitionKind, RpmbRegion};
 use crate::da::protocol::{BootMode, DAProtocolParams};
-use crate::da::{DAFile, DAProtocol, DAType, XFlash, Xml};
+use crate::da::{DAFile, DAProtocol, DAType, DownloadProtocol, XFlash, Xml};
 use crate::error::{Error, Result};
 
 /// A builder for creating a new [`Device`].
@@ -141,7 +141,7 @@ pub struct Device {
     /// Connection to the device via MTK port, null if DA protocol is used.
     connection: Option<Connection>,
     /// DA protocol handler, null if only preloader commands are used.
-    protocol: Option<Box<dyn DAProtocol + Send>>,
+    protocol: Option<DAProtocol>,
     /// Whether the device is connected and initialized.
     connected: bool,
     /// Raw DA file data, if provided.
@@ -283,7 +283,7 @@ impl Device {
     }
 
     /// Internal helper to ensure the device enters DA mode before performing DA operations.
-    async fn ensure_da_mode(&mut self) -> Result<&mut (dyn DAProtocol + Send)> {
+    async fn ensure_da_mode(&mut self) -> Result<&mut DAProtocol> {
         if !self.connected {
             return Err(Error::conn("Device is not connected. Call init() first."));
         }
@@ -300,7 +300,7 @@ impl Device {
         Ok(self.get_protocol().unwrap())
     }
 
-    async fn init_da_protocol(&mut self, conn: Connection) -> Result<Box<dyn DAProtocol + Send>> {
+    async fn init_da_protocol(&mut self, conn: Connection) -> Result<DAProtocol> {
         let da_bytes = self.da_data.clone().ok_or_else(|| {
             Error::conn("DA protocol is not initialized and no DA file was provided.")
         })?;
@@ -311,7 +311,7 @@ impl Device {
             Error::penumbra(format!("No compatible DA for hardware code 0x{:04X}", hw_code))
         })?;
 
-        let da_type = da.da_type.clone();
+        let da_type = da.da_type;
 
         let params = DAProtocolParams {
             da,
@@ -322,9 +322,9 @@ impl Device {
             preloader: self.preloader_data.clone(),
         };
 
-        let protocol: Box<dyn DAProtocol + Send> = match da_type {
-            DAType::V5 => Box::new(XFlash::new(conn, params)),
-            DAType::V6 => Box::new(Xml::new(conn, params)),
+        let protocol: DAProtocol = match da_type {
+            DAType::V5 => DAProtocol::V5(XFlash::new(conn, params)),
+            DAType::V6 => DAProtocol::V6(Xml::new(conn, params)),
             _ => return Err(Error::penumbra("Unsupported DA type")),
         };
 
@@ -363,8 +363,8 @@ impl Device {
 
     /// Gets a mutable reference to the DA protocol handler, if available.
     /// Returns `None` if the device is not in DA mode.
-    pub fn get_protocol(&mut self) -> Option<&mut (dyn DAProtocol + Send)> {
-        self.protocol.as_deref_mut()
+    pub fn get_protocol(&mut self) -> Option<&mut DAProtocol> {
+        self.protocol.as_mut()
     }
 
     /// Retrieves the list of partitions from the device.

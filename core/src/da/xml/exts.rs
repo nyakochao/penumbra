@@ -9,7 +9,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use xmlcmd_derive::XmlCommand;
 
 use crate::core::storage::{RPMB_FRAME_DATA_SZ, RpmbRegion, StorageType};
-use crate::da::DAProtocol;
+use crate::da::DownloadProtocol;
 use crate::da::xml::Xml;
 use crate::da::xml::cmds::{XmlCmdLifetime, XmlCommand};
 use crate::da::xml::patch::to_arch;
@@ -124,12 +124,9 @@ pub async fn boot_extensions(xml: &mut Xml) -> Result<bool> {
         return Ok(false);
     }
 
-    match xmlcmd!(xml, ExtAck) {
-        Ok(_) => {}
-        Err(_) => {
-            info!("Extensions did not reply, continuing without extensions");
-            return Ok(false);
-        }
+    if xmlcmd!(xml, ExtAck).is_err() {
+        info!("Extensions did not reply, continuing without extensions");
+        return Ok(false);
     }
 
     let response = match xml.get_upload_file_resp().await {
@@ -301,7 +298,6 @@ async fn init_rpmb(xml: &mut Xml, region: RpmbRegion) -> Result<()> {
     xmlcmd!(xml, ExtKeyDerive, "RPMB")?;
     let resp = xml.get_upload_file_resp().await?;
     let key: String = get_tag(&resp, "key")?;
-    //let rpmb_key = hex::decode(key_str).map_err(|_| Error::proto("Invalid RPMB key format"))?;
 
     // If the RPMB is already initialized (even with another key), this will succeed
     // without actually changing the key.

@@ -6,7 +6,7 @@ use std::io::Cursor;
 
 use crate::core::seccfg::{SecCfgV4, SecCfgV4Algo};
 use crate::da::xml::exts::sej;
-use crate::da::{DAProtocol, Xml};
+use crate::da::{DownloadProtocol, Xml};
 
 pub async fn parse_seccfg(xml: &mut Xml) -> Option<SecCfgV4> {
     let seccfg = xml.dev_info.get_partition("seccfg").await?;

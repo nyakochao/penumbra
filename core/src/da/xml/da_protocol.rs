@@ -14,7 +14,7 @@ use crate::connection::port::ConnectionType;
 use crate::core::devinfo::DeviceInfo;
 use crate::core::seccfg::LockFlag;
 use crate::core::storage::{Gpt, Partition, PartitionKind, RpmbRegion, Storage, StorageType};
-use crate::da::protocol::{BootMode, DAProtocol};
+use crate::da::protocol::{BootMode, DownloadProtocol};
 use crate::da::xml::cmds::{
     BootTo,
     HOST_CMDS,
@@ -36,7 +36,7 @@ use crate::exploit;
 use crate::exploit::{Carbonara, Exploit, HeapBait};
 
 #[async_trait]
-impl DAProtocol for Xml {
+impl DownloadProtocol for Xml {
     async fn upload_da(&mut self) -> Result<bool> {
         let da1 = self.da.get_da1().ok_or_else(|| Error::penumbra("DA1 region not found"))?;
 

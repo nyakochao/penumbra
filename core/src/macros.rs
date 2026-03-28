@@ -6,10 +6,10 @@ macro_rules! exploit {
             if $proto.patch {
                 let mut exploit = <$exploit>::new();
 
-                if let Ok(result) = exploit.run($proto).await {
+                if let Ok(result) = <$exploit as Exploit<Self>>::run(&mut exploit, $proto).await {
                     $proto.patch = !result;
-
-                    if let Some(patched_da) = exploit.get_patched_da() {
+                    if let Some(patched_da) = <$exploit as Exploit<Self>>::get_patched_da(&exploit)
+                    {
                         $proto.da = patched_da;
                     }
                 }

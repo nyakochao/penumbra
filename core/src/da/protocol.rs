@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use downcast_rs::{DowncastSend, impl_downcast};
+use enum_dispatch::enum_dispatch;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::DeviceLog;
@@ -14,7 +15,7 @@ use crate::core::chip::ChipInfo;
 use crate::core::devinfo::DeviceInfo;
 use crate::core::seccfg::LockFlag;
 use crate::core::storage::{Partition, PartitionKind, RpmbRegion, Storage, StorageType};
-use crate::da::{DA, DAEntryRegion};
+use crate::da::{DA, DAEntryRegion, XFlash, Xml};
 use crate::error::Result;
 
 /// MAGIC value for V5/V6 packets.
@@ -114,8 +115,15 @@ pub struct DAProtocolParams {
     pub preloader: Option<Vec<u8>>, // TODO: Switch to Preloader type
 }
 
+#[enum_dispatch(DownloadProtocol)]
+pub enum DAProtocol {
+    V5(XFlash),
+    V6(Xml),
+}
+
 #[async_trait::async_trait]
-pub trait DAProtocol: DowncastSend {
+#[enum_dispatch]
+pub trait DownloadProtocol: DowncastSend {
     // Main helpers
     async fn upload_da(&mut self) -> Result<bool>;
     async fn boot_to(&mut self, addr: u32, data: &[u8]) -> Result<bool>;
@@ -255,4 +263,4 @@ pub trait DAProtocol: DowncastSend {
     fn patch_da2(&mut self) -> Option<DAEntryRegion>;
 }
 
-impl_downcast!(DAProtocol);
+impl_downcast!(DownloadProtocol);

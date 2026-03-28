@@ -6,7 +6,7 @@ use log::{debug, info};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::core::storage::PartitionKind;
-use crate::da::DAProtocol;
+use crate::da::DownloadProtocol;
 use crate::da::xflash::XFlash;
 use crate::da::xflash::cmds::*;
 use crate::error::{Error, Result};

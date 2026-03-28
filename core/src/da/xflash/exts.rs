@@ -8,7 +8,7 @@ use log::{debug, info};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::core::storage::{RPMB_FRAME_DATA_SZ, RpmbRegion};
-use crate::da::DAProtocol;
+use crate::da::DownloadProtocol;
 use crate::da::xflash::{Cmd, XFlash};
 use crate::error::{Error, Result};
 use crate::le_u32;
