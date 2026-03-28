@@ -5,12 +5,12 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use clap::{Args, Subcommand};
 use log::info;
 use penumbra::Device;
-use penumbra::da::XFlash;
+use penumbra::da::DAProtocol;
 use penumbra::da::xflash::flash::set_rsc_info;
 use tokio::fs::{File, metadata};
 use tokio::io::BufReader;
@@ -57,11 +57,12 @@ impl MtkCommand for RscFlashArgs {
             ));
         }
 
-        let proto = dev.get_protocol().unwrap();
-        let xflash = proto
-            .as_any_mut()
-            .downcast_mut::<XFlash>()
-            .ok_or_else(|| anyhow::anyhow!("Current protocol is not XFlash"))?;
+        let mut proto = dev.get_protocol().unwrap();
+        let xflash = if let DAProtocol::V5(xflash) = &mut proto {
+            xflash
+        } else {
+            return Err(anyhow!("Protocol is not XFlash!"));
+        };
 
         let pb = AntumbraProgress::new(file_size);
 

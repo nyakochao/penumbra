@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use clap::Args;
 use log::info;
 use penumbra::Device;
+use penumbra::da::DownloadProtocol;
 use tokio::fs::{File, create_dir_all, read_dir};
 use tokio::io::{AsyncWriteExt, BufWriter};
 
