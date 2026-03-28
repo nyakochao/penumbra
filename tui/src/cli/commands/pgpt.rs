@@ -4,7 +4,6 @@
 */
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Args;
 use human_bytes::human_bytes;
 use log::info;
@@ -31,15 +30,14 @@ impl CommandMetadata for PgptArgs {
     }
 }
 
-#[async_trait]
 impl MtkCommand for PgptArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
 
-        let partitions = dev.dev_info.partitions().await;
+        let partitions = dev.dev_info.partitions();
 
         info!("Partition Table:");
         for p in partitions {

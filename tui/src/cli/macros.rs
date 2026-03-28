@@ -17,14 +17,14 @@ macro_rules! mtk_commands {
 
         #[async_trait::async_trait]
         impl $crate::cli::MtkCommand for Commands {
-            async fn run(
+            fn run(
                 &self,
                 dev: &mut penumbra::Device,
                 state: &mut $crate::cli::state::PersistedDeviceState,
             ) -> anyhow::Result<()> {
                 match self {
                     $(
-                        Commands::$variant(inner) => inner.run(dev, state).await,
+                        Commands::$variant(inner) => inner.run(dev, state),
                     )+
                 }
             }

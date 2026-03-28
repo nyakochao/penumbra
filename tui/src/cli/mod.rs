@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::{CommandFactory, Parser};
 use log::info;
 use penumbra::connection::port::ConnectionType;
@@ -68,9 +67,8 @@ mtk_commands! {
     XFlash(XFlashArgs),
 }
 
-#[async_trait]
 pub trait MtkCommand {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()>;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()>;
 }
 
 pub async fn run_cli(args: &CliArgs) -> Result<()> {
@@ -103,7 +101,7 @@ pub async fn run_cli(args: &CliArgs) -> Result<()> {
 
     info!("Waiting for MTK device...");
     let mtk_port = loop {
-        if let Some(port) = find_mtk_port().await {
+        if let Some(port) = find_mtk_port() {
             info!("Found MTK port: {}", port.get_port_name());
             break port;
         } else if last_seen.elapsed() > timeout {
@@ -154,15 +152,15 @@ pub async fn run_cli(args: &CliArgs) -> Result<()> {
         }
 
         dev.dev_info.set_chip(penumbra::core::chip::chip_from_hw_code(state.hw_code));
-        dev.reinit(dev_info).await?;
+        dev.reinit(dev_info)?;
     } else {
         info!("Initializing device...");
-        dev.init().await?;
+        dev.init()?;
 
-        state.soc_id = dev.dev_info.soc_id().await;
-        state.meid = dev.dev_info.meid().await;
-        state.hw_code = dev.dev_info.hw_code().await;
-        state.target_config = dev.dev_info.target_config().await;
+        state.soc_id = dev.dev_info.soc_id();
+        state.meid = dev.dev_info.meid();
+        state.hw_code = dev.dev_info.hw_code();
+        state.target_config = dev.dev_info.target_config();
 
         state.save().await?;
     }
@@ -174,8 +172,8 @@ pub async fn run_cli(args: &CliArgs) -> Result<()> {
     info!("=====================================");
 
     if let Some(cmd) = &args.command {
-        cmd.run(&mut dev, &mut state).await?;
-        state.target_config = dev.dev_info.target_config().await; // Update just in case after Kamakiri
+        cmd.run(&mut dev, &mut state)?;
+        state.target_config = dev.dev_info.target_config(); // Update just in case after Kamakiri
         state.save().await?;
     }
 

@@ -2,14 +2,13 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
+use std::fs::{File, metadata};
+use std::io::BufReader;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Args;
 use penumbra::Device;
-use tokio::fs::{File, metadata};
-use tokio::io::BufReader;
 
 use crate::cli::MtkCommand;
 use crate::cli::common::{CONN_DA, CommandMetadata};
@@ -39,20 +38,19 @@ impl CommandMetadata for WriteArgs {
     }
 }
 
-#[async_trait]
 impl MtkCommand for WriteArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
 
-        let file = File::open(&self.file).await?;
+        let file = File::open(&self.file)?;
         let mut reader = BufReader::new(file);
 
-        let file_size = metadata(&self.file).await?.len();
+        let file_size = metadata(&self.file)?.len();
 
-        let part_size = match dev.dev_info.get_partition(&self.partition).await {
+        let part_size = match dev.dev_info.get_partition(&self.partition) {
             Some(p) => p.size as u64,
             None => {
                 return Err(anyhow::anyhow!("Partition '{}' not found on device.", self.partition));
@@ -73,7 +71,7 @@ impl MtkCommand for WriteArgs {
             }
         };
 
-        match dev.write_partition(&self.partition, &mut reader, &mut progress_callback).await {
+        match dev.write_partition(&self.partition, &mut reader, &mut progress_callback) {
             Ok(_) => {}
             Err(e) => {
                 pb.abandon("Write failed!");

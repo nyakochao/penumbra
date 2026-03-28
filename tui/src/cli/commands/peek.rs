@@ -2,16 +2,15 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Args;
 use clap_num::maybe_hex;
 use log::info;
 use penumbra::Device;
-use tokio::fs::File;
-use tokio::io::BufWriter;
 
 use crate::cli::MtkCommand;
 use crate::cli::common::{CONN_DA, CommandMetadata};
@@ -40,15 +39,14 @@ impl CommandMetadata for PeekArgs {
     }
 }
 
-#[async_trait]
 impl MtkCommand for PeekArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
 
-        let file = File::create(&self.output_file).await?;
+        let file = File::create(&self.output_file)?;
         let mut writer = BufWriter::new(file);
 
         let pb = AntumbraProgress::new(self.length as u64);
@@ -69,7 +67,7 @@ impl MtkCommand for PeekArgs {
             self.address, self.length
         );
 
-        match dev.peek(self.address, self.length, &mut writer, &mut progress_callback).await {
+        match dev.peek(self.address, self.length, &mut writer, &mut progress_callback) {
             Ok(_) => {}
             Err(e) => {
                 pb.abandon("Read failed!");

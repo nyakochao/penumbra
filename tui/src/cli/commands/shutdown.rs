@@ -4,7 +4,6 @@
 */
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Args;
 use log::info;
 use penumbra::Device;
@@ -26,15 +25,14 @@ impl CommandMetadata for ShutdownArgs {
     }
 }
 
-#[async_trait]
 impl MtkCommand for ShutdownArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
 
-        dev.shutdown().await?;
+        dev.shutdown()?;
         info!("Device shutdown successfully.");
 
         Ok(())

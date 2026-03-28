@@ -2,15 +2,14 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
+use std::fs::File;
+use std::io::BufWriter;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Args;
 use log::info;
 use penumbra::Device;
-use tokio::fs::File;
-use tokio::io::BufWriter;
 
 use crate::cli::MtkCommand;
 use crate::cli::common::{CONN_DA, CommandMetadata};
@@ -40,15 +39,14 @@ impl CommandMetadata for UploadArgs {
     }
 }
 
-#[async_trait]
 impl MtkCommand for UploadArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
 
-        let partition = match dev.dev_info.get_partition(&self.partition).await {
+        let partition = match dev.dev_info.get_partition(&self.partition) {
             Some(p) => p,
             None => {
                 info!("Partition '{}' not found on device.", self.partition);
@@ -70,10 +68,10 @@ impl MtkCommand for UploadArgs {
             }
         };
 
-        let file = File::create(&self.output_file).await?;
+        let file = File::create(&self.output_file)?;
         let mut writer = BufWriter::new(file);
 
-        match dev.upload(&self.partition, &mut writer, &mut progress_callback).await {
+        match dev.upload(&self.partition, &mut writer, &mut progress_callback) {
             Ok(_) => {}
             Err(e) => {
                 pb.abandon("Upload failed!");

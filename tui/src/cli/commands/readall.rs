@@ -2,16 +2,15 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
+use std::fs::{File, create_dir_all, read_dir};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use async_trait::async_trait;
 use clap::Args;
 use log::info;
 use penumbra::Device;
 use penumbra::da::DownloadProtocol;
-use tokio::fs::{File, create_dir_all, read_dir};
-use tokio::io::{AsyncWriteExt, BufWriter};
 
 use crate::cli::MtkCommand;
 use crate::cli::common::{CONN_DA, CommandMetadata};
@@ -42,12 +41,11 @@ impl CommandMetadata for ReadAllArgs {
     }
 }
 
-#[async_trait]
 impl MtkCommand for ReadAllArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
         let output_dir: &Path = &self.output_dir;
 
-        if let Err(e) = create_dir_all(output_dir).await {
+        if let Err(e) = create_dir_all(output_dir) {
             return Err(anyhow!(
                 "Failed to create output directory '{}': {}",
                 output_dir.display(),
@@ -55,17 +53,17 @@ impl MtkCommand for ReadAllArgs {
             ));
         }
 
-        let mut dir_entries = read_dir(output_dir).await?;
-        if dir_entries.next_entry().await?.is_some() {
+        let mut dir_entries = read_dir(output_dir)?;
+        if dir_entries.next().is_some() {
             return Err(anyhow!("Output directory '{}' is not empty", output_dir.display()));
         }
 
-        dev.enter_da_mode().await?;
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
 
-        let partitions = dev.get_partitions().await;
+        let partitions = dev.get_partitions();
         if partitions.is_empty() {
             info!("No partitions found on device.");
             return Ok(());
@@ -80,7 +78,7 @@ impl MtkCommand for ReadAllArgs {
             }
 
             let output_path = self.output_dir.join(format!("{}.bin", p.name));
-            let mut output_file = BufWriter::new(File::create(&output_path).await?);
+            let mut output_file = BufWriter::new(File::create(&output_path)?);
 
             let part_size = p.size as u64;
             let pb = AntumbraProgress::new(part_size);
@@ -96,17 +94,20 @@ impl MtkCommand for ReadAllArgs {
                 }
             };
 
-            match proto
-                .read_flash(p.address, p.size, p.kind, &mut progress_callback, &mut output_file)
-                .await
-            {
+            match proto.read_flash(
+                p.address,
+                p.size,
+                p.kind,
+                &mut progress_callback,
+                &mut output_file,
+            ) {
                 Ok(_) => {}
                 Err(_) => {
                     pb.abandon("Read failed! Skipping partition.");
                 }
             }
 
-            output_file.flush().await?;
+            output_file.flush()?;
             info!("Saved partition '{}' to '{}'", p.name, output_path.display());
         }
 

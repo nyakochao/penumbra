@@ -4,7 +4,6 @@
 */
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use penumbra::Device;
 use penumbra::da::protocol::BootMode;
@@ -52,16 +51,15 @@ pub struct RebootArgs {
     pub action: RebootAction,
 }
 
-#[async_trait]
 impl MtkCommand for RebootArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
 
         let bootmode: BootMode = self.action.clone().into();
-        dev.reboot(bootmode).await?;
+        dev.reboot(bootmode)?;
 
         Ok(())
     }

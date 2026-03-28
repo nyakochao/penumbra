@@ -3,16 +3,15 @@
     SPDX-FileCopyrightText: 2026 Shomy
 */
 
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use async_trait::async_trait;
 use clap::Args;
 use log::info;
 use penumbra::Device;
 use penumbra::core::storage::RpmbRegion;
-use tokio::fs::File;
-use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 
 use crate::cli::MtkCommand;
 use crate::cli::common::{CONN_DA, CommandMetadata};
@@ -85,7 +84,7 @@ impl CommandMetadata for RpmbArgs {
     }
 }
 
-async fn perform_rpmb_io(
+fn perform_rpmb_io(
     dev: &mut Device,
     region: RpmbRegion,
     start_sector: u32,
@@ -93,11 +92,8 @@ async fn perform_rpmb_io(
     file_path: &PathBuf,
     is_read: bool,
 ) -> Result<()> {
-    let storage = dev
-        .dev_info
-        .storage()
-        .await
-        .ok_or_else(|| anyhow!("Failed to retrieve storage information"))?;
+    let storage =
+        dev.dev_info.storage().ok_or_else(|| anyhow!("Failed to retrieve storage information"))?;
 
     let rpmb_size = storage.get_rpmb_size();
     if rpmb_size == 0 {
@@ -132,25 +128,22 @@ async fn perform_rpmb_io(
     };
 
     if is_read {
-        let file = File::create(file_path).await?;
+        let file = File::create(file_path)?;
         let mut writer = BufWriter::new(file);
-        dev.read_rpmb(region, start_sector, num_sectors, &mut writer, &mut progress_callback)
-            .await?;
-        writer.flush().await?;
+        dev.read_rpmb(region, start_sector, num_sectors, &mut writer, &mut progress_callback)?;
+        writer.flush()?;
     } else {
-        let file = File::open(file_path).await?;
+        let file = File::open(file_path)?;
         let mut reader = BufReader::new(file);
-        dev.write_rpmb(region, start_sector, num_sectors, &mut reader, &mut progress_callback)
-            .await?;
+        dev.write_rpmb(region, start_sector, num_sectors, &mut reader, &mut progress_callback)?;
     }
 
     Ok(())
 }
 
-#[async_trait]
 impl MtkCommand for RpmbArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
@@ -161,7 +154,7 @@ impl MtkCommand for RpmbArgs {
             RpmbCommand::Auth(args) => RpmbRegion::try_from(args.region).unwrap_or(RpmbRegion::R1),
         };
 
-        let rpmb_size = match dev.dev_info.storage().await {
+        let rpmb_size = match dev.dev_info.storage() {
             Some(storage) => storage.get_rpmb_size(),
             None => return Err(anyhow!("Failed to retrieve storage information")),
         };
@@ -172,8 +165,14 @@ impl MtkCommand for RpmbArgs {
 
         match &self.command {
             RpmbCommand::Read(args) => {
-                perform_rpmb_io(dev, region, args.start_sector, args.num_sectors, &args.file, true)
-                    .await?;
+                perform_rpmb_io(
+                    dev,
+                    region,
+                    args.start_sector,
+                    args.num_sectors,
+                    &args.file,
+                    true,
+                )?;
             }
             RpmbCommand::Write(args) => {
                 perform_rpmb_io(
@@ -183,13 +182,12 @@ impl MtkCommand for RpmbArgs {
                     args.num_sectors,
                     &args.file,
                     false,
-                )
-                .await?;
+                )?;
             }
             RpmbCommand::Auth(args) => {
                 info!("Authenticating RPMB using provided key...");
                 let key = hex::decode(&args.key)?;
-                dev.auth_rpmb(region, &key).await?;
+                dev.auth_rpmb(region, &key)?;
                 info!("Authentication was successful!");
             }
         }

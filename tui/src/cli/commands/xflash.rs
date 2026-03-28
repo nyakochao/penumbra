@@ -3,17 +3,16 @@
     SPDX-FileCopyrightText: 2026 Shomy
 */
 
+use std::fs::{File, metadata};
+use std::io::BufReader;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
-use async_trait::async_trait;
 use clap::{Args, Subcommand};
 use log::info;
 use penumbra::Device;
 use penumbra::da::DAProtocol;
 use penumbra::da::xflash::flash::set_rsc_info;
-use tokio::fs::{File, metadata};
-use tokio::io::BufReader;
 
 use crate::cli::MtkCommand;
 use crate::cli::common::{CONN_DA, CommandMetadata};
@@ -28,21 +27,20 @@ pub struct RscFlashArgs {
     pub file: PathBuf,
 }
 
-#[async_trait]
 impl MtkCommand for RscFlashArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
 
         info!("Flashing file {:?} to partition {} with RSC", self.file, self.partition);
 
-        let file = File::open(&self.file).await?;
+        let file = File::open(&self.file)?;
         let mut reader = BufReader::new(file);
 
-        let file_size = metadata(&self.file).await?.len();
+        let file_size = metadata(&self.file)?.len();
 
-        let part_size = match dev.dev_info.get_partition(&self.partition).await {
+        let part_size = match dev.dev_info.get_partition(&self.partition) {
             Some(p) => p.size as u64,
             None => {
                 return Err(anyhow::anyhow!("Partition '{}' not found on device.", self.partition));
@@ -83,8 +81,7 @@ impl MtkCommand for RscFlashArgs {
             file_size as usize,
             &mut reader,
             &mut progress_callback,
-        )
-        .await?;
+        )?;
 
         info!("Flashing to partition '{}' completed.", self.partition);
 
@@ -117,11 +114,10 @@ impl CommandMetadata for XFlashArgs {
     }
 }
 
-#[async_trait]
 impl MtkCommand for XFlashArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
         match &self.command {
-            XFlashSubcommand::RscFlash(cmd) => cmd.run(dev, state).await,
+            XFlashSubcommand::RscFlash(cmd) => cmd.run(dev, state),
         }
     }
 }

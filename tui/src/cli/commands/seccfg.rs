@@ -4,7 +4,6 @@
 */
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::{Args, ValueEnum};
 use log::info;
 use penumbra::Device;
@@ -37,10 +36,9 @@ impl CommandMetadata for SeccfgArgs {
     }
 }
 
-#[async_trait]
 impl MtkCommand for SeccfgArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
@@ -48,7 +46,7 @@ impl MtkCommand for SeccfgArgs {
         match self.action {
             SeccfgAction::Unlock => {
                 info!("Unlocking seccfg...");
-                match dev.set_seccfg_lock_state(LockFlag::Unlock).await {
+                match dev.set_seccfg_lock_state(LockFlag::Unlock) {
                     Some(_) => (),
                     None => {
                         info!("Failed to unlock seccfg or already unlocked.");
@@ -59,7 +57,7 @@ impl MtkCommand for SeccfgArgs {
             }
             SeccfgAction::Lock => {
                 info!("Locking seccfg partition...");
-                match dev.set_seccfg_lock_state(LockFlag::Lock).await {
+                match dev.set_seccfg_lock_state(LockFlag::Lock) {
                     Some(_) => (),
                     None => {
                         info!("Failed to lock seccfg or already locked.");

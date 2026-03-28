@@ -4,7 +4,6 @@
 */
 
 use anyhow::Result;
-use async_trait::async_trait;
 use clap::Args;
 use log::info;
 use penumbra::Device;
@@ -34,15 +33,14 @@ impl CommandMetadata for FormatArgs {
     }
 }
 
-#[async_trait]
 impl MtkCommand for FormatArgs {
-    async fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
-        dev.enter_da_mode().await?;
+    fn run(&self, dev: &mut Device, state: &mut PersistedDeviceState) -> Result<()> {
+        dev.enter_da_mode()?;
 
         state.connection_type = CONN_DA;
         state.flash_mode = 1;
 
-        let partition = match dev.dev_info.get_partition(&self.partition).await {
+        let partition = match dev.dev_info.get_partition(&self.partition) {
             Some(p) => p,
             None => {
                 info!("Partition '{}' not found on device.", self.partition);
@@ -63,7 +61,7 @@ impl MtkCommand for FormatArgs {
             }
         };
 
-        match dev.format(&self.partition, &mut progress_callback).await {
+        match dev.format(&self.partition, &mut progress_callback) {
             Ok(_) => {}
             Err(e) => {
                 pb.abandon("Format failed!");
