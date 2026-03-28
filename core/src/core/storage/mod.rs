@@ -77,7 +77,6 @@ impl PartitionKind {
     }
 }
 
-#[async_trait::async_trait]
 pub trait Storage: Send + Sync {
     fn kind(&self) -> StorageType;
     fn block_size(&self) -> u32;

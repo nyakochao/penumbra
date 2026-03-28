@@ -34,25 +34,24 @@ pub enum ConnectionType {
     Da,
 }
 
-#[async_trait::async_trait]
 pub trait MTKPort: Send + Debug {
-    async fn open(&mut self) -> Result<()>;
-    async fn close(&mut self) -> Result<()>;
-    async fn read_exact(&mut self, buf: &mut [u8]) -> Result<usize>;
-    async fn write_all(&mut self, buf: &[u8]) -> Result<()>;
-    async fn flush(&mut self) -> Result<()>;
+    fn open(&mut self) -> Result<()>;
+    fn close(&mut self) -> Result<()>;
+    fn read_exact(&mut self, buf: &mut [u8]) -> Result<usize>;
+    fn write_all(&mut self, buf: &[u8]) -> Result<()>;
+    fn flush(&mut self) -> Result<()>;
 
-    async fn handshake(&mut self) -> Result<()>;
+    fn handshake(&mut self) -> Result<()>;
     fn get_connection_type(&self) -> ConnectionType;
     fn get_baudrate(&self) -> u32;
     fn get_port_name(&self) -> String;
 
-    async fn find_device() -> Result<Option<Self>>
+    fn find_device() -> Result<Option<Self>>
     where
         Self: Sized;
 
     // Only for USB ports
-    async fn ctrl_out(
+    fn ctrl_out(
         &mut self,
         request_type: u8,
         request: u8,
@@ -60,7 +59,7 @@ pub trait MTKPort: Send + Debug {
         index: u16,
         data: &[u8],
     ) -> Result<()>;
-    async fn ctrl_in(
+    fn ctrl_in(
         &mut self,
         request_type: u8,
         request: u8,
@@ -70,22 +69,22 @@ pub trait MTKPort: Send + Debug {
     ) -> Result<Vec<u8>>;
 }
 
-pub async fn find_mtk_port() -> Option<Box<dyn MTKPort>> {
+pub fn find_mtk_port() -> Option<Box<dyn MTKPort>> {
     // Default NUSB backend
     #[cfg(not(any(feature = "libusb", feature = "serial")))]
-    let port = UsbMTKPort::find_device().await;
+    let port = UsbMTKPort::find_device();
 
     // LibUSB backend
     #[cfg(feature = "libusb")]
-    let port = UsbMTKPort::find_device().await;
+    let port = UsbMTKPort::find_device();
 
     // Serial backend, not ideal since some features (i.e. linecoding) aren't available.
     #[cfg(feature = "serial")]
-    let port = SerialMTKPort::find_device().await;
+    let port = SerialMTKPort::find_device();
 
     match port {
         Ok(Some(mut port)) => {
-            if port.open().await.is_ok() {
+            if port.open().is_ok() {
                 Some(Box::new(port))
             } else {
                 None

@@ -2,8 +2,9 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
+use std::io::{Read, Write};
+
 use log::{debug, info};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::core::storage::PartitionKind;
 use crate::da::DownloadProtocol;
@@ -12,17 +13,17 @@ use crate::da::xflash::cmds::*;
 use crate::error::{Error, Result};
 use crate::{le_u32, le_u64};
 
-pub async fn read_flash(
+pub fn read_flash(
     xflash: &mut XFlash,
     addr: u64,
     size: usize,
     section: PartitionKind,
     progress: &mut (dyn FnMut(usize, usize) + Send),
-    writer: &mut (dyn AsyncWrite + Unpin + Send),
+    writer: &mut (dyn Write + Send),
 ) -> Result<()> {
     info!("Reading flash at address {:#X} with size {:#X}", addr, size);
 
-    let storage_type = xflash.get_storage_type().await as u32;
+    let storage_type = xflash.get_storage_type() as u32;
     let partition_type = section.as_u32();
 
     // Format:
@@ -44,28 +45,28 @@ pub async fn read_flash(
     param[8..16].copy_from_slice(&addr.to_le_bytes());
     param[16..24].copy_from_slice(&(size as u64).to_le_bytes());
 
-    xflash.send_cmd(Cmd::ReadData).await?;
-    xflash.send(&param).await?;
+    xflash.send_cmd(Cmd::ReadData)?;
+    xflash.send(&param)?;
     status_ok!(xflash);
 
-    xflash.upload_data(size, writer, progress).await?;
+    xflash.upload_data(size, writer, progress)?;
 
     info!("Flash read completed, 0x{:X} bytes read.", size);
 
     Ok(())
 }
 
-pub async fn write_flash(
+pub fn write_flash(
     xflash: &mut XFlash,
     addr: u64,
     size: usize,
-    reader: &mut (dyn AsyncRead + Unpin + Send),
+    reader: &mut (dyn Read + Send),
     section: PartitionKind,
     progress: &mut (dyn FnMut(usize, usize) + Send),
 ) -> Result<()> {
     info!("Writing flash at address {:#X} with size {:#X}", addr, size);
 
-    let storage_type = xflash.get_storage_type().await as u32;
+    let storage_type = xflash.get_storage_type() as u32;
     let partition_type = section.as_u32();
 
     let mut param = [0u8; 56];
@@ -74,17 +75,17 @@ pub async fn write_flash(
     param[8..16].copy_from_slice(&addr.to_le_bytes());
     param[16..24].copy_from_slice(&(size as u64).to_le_bytes());
 
-    xflash.send_cmd(Cmd::WriteData).await?;
-    xflash.send(&param).await?;
+    xflash.send_cmd(Cmd::WriteData)?;
+    xflash.send(&param)?;
 
-    xflash.download_data(size, reader, progress).await?;
+    xflash.download_data(size, reader, progress)?;
 
     info!("Flash write completed, 0x{:X} bytes written.", size);
 
     Ok(())
 }
 
-pub async fn erase_flash(
+pub fn erase_flash(
     xflash: &mut XFlash,
     addr: u64,
     size: usize,
@@ -93,7 +94,7 @@ pub async fn erase_flash(
 ) -> Result<()> {
     info!("Erasing flash at address {:#X} with size {:#X}", addr, size);
 
-    let storage_type = xflash.get_storage_type().await as u32;
+    let storage_type = xflash.get_storage_type() as u32;
     let partition_type = section.as_u32();
 
     let mut param = [0u8; 56];
@@ -102,28 +103,28 @@ pub async fn erase_flash(
     param[8..16].copy_from_slice(&addr.to_le_bytes());
     param[16..24].copy_from_slice(&(size as u64).to_le_bytes());
 
-    xflash.send_cmd(Cmd::DeviceCtrl).await?;
-    xflash.send_cmd(Cmd::StartDlInfo).await?;
+    xflash.send_cmd(Cmd::DeviceCtrl)?;
+    xflash.send_cmd(Cmd::StartDlInfo)?;
     status_ok!(xflash);
 
-    xflash.send_cmd(Cmd::Format).await?;
-    xflash.send(&param).await?;
+    xflash.send_cmd(Cmd::Format)?;
+    xflash.send(&param)?;
 
-    xflash.progress_report(size, progress).await?;
+    xflash.progress_report(size, progress)?;
 
-    xflash.send_cmd(Cmd::DeviceCtrl).await?;
-    xflash.send_cmd(Cmd::EndDlInfo).await?;
+    xflash.send_cmd(Cmd::DeviceCtrl)?;
+    xflash.send_cmd(Cmd::EndDlInfo)?;
     status_ok!(xflash);
 
     info!("Flash erase completed.");
     Ok(())
 }
 
-pub async fn download(
+pub fn download(
     xflash: &mut XFlash,
     part_name: String,
     size: usize,
-    reader: &mut (dyn AsyncRead + Unpin + Send),
+    reader: &mut (dyn Read + Send),
     progress: &mut (dyn FnMut(usize, usize) + Send),
 ) -> Result<()> {
     // Works like write_flash, but instead of address and size, it takes a partition name
@@ -133,19 +134,19 @@ pub async fn download(
     // Also, this command doesn't support writing only a part of the partition,
     // it will always write the whole partition with the data provided.
 
-    xflash.send_cmd(Cmd::DeviceCtrl).await?;
-    xflash.send_cmd(Cmd::StartDlInfo).await?;
+    xflash.send_cmd(Cmd::DeviceCtrl)?;
+    xflash.send_cmd(Cmd::StartDlInfo)?;
     status_ok!(xflash);
 
-    xflash.send_cmd(Cmd::Download).await?;
-    xflash.send_data(&[part_name.as_bytes(), &size.to_le_bytes()]).await?;
+    xflash.send_cmd(Cmd::Download)?;
+    xflash.send_data(&[part_name.as_bytes(), &size.to_le_bytes()])?;
 
     info!("Starting download to partition '{}' with size 0x{:X}", part_name, size);
 
-    xflash.download_data(size, reader, progress).await?;
+    xflash.download_data(size, reader, progress)?;
 
-    xflash.send_cmd(Cmd::DeviceCtrl).await?;
-    xflash.send_cmd(Cmd::EndDlInfo).await?;
+    xflash.send_cmd(Cmd::DeviceCtrl)?;
+    xflash.send_cmd(Cmd::EndDlInfo)?;
     status_ok!(xflash);
 
     debug!("Download completed, 0x{:X} bytes sent.", size);
@@ -153,17 +154,17 @@ pub async fn download(
     Ok(())
 }
 
-pub async fn upload(
+pub fn upload(
     xflash: &mut XFlash,
     part_name: String,
-    writer: &mut (dyn AsyncWrite + Unpin + Send),
+    writer: &mut (dyn Write + Send),
     progress: &mut (dyn FnMut(usize, usize) + Send),
 ) -> Result<()> {
-    xflash.send_cmd(Cmd::Upload).await?;
-    xflash.send(part_name.as_bytes()).await?;
+    xflash.send_cmd(Cmd::Upload)?;
+    xflash.send(part_name.as_bytes())?;
 
     let size = {
-        let size_data = xflash.read_data().await?;
+        let size_data = xflash.read_data()?;
         status_ok!(xflash);
         if size_data.len() < 8 {
             return Err(Error::proto("Received upload size is too short"));
@@ -173,19 +174,19 @@ pub async fn upload(
 
     info!("Starting readback of partition '{}' with size 0x{:X}", part_name, size);
 
-    xflash.upload_data(size, writer, progress).await?;
+    xflash.upload_data(size, writer, progress)?;
 
     info!("Upload completed, 0x{:X} bytes received.", size);
 
     Ok(())
 }
 
-pub async fn format(
+pub fn format(
     xflash: &mut XFlash,
     part_name: String,
     progress: &mut (dyn FnMut(usize, usize) + Send),
 ) -> Result<()> {
-    let part = match xflash.dev_info.get_partition(&part_name).await {
+    let part = match xflash.dev_info.get_partition(&part_name) {
         Some(p) => p,
         None => {
             return Err(Error::proto(format!(
@@ -195,31 +196,31 @@ pub async fn format(
         }
     };
 
-    xflash.send_cmd(Cmd::DeviceCtrl).await?;
-    xflash.send_cmd(Cmd::StartDlInfo).await?;
+    xflash.send_cmd(Cmd::DeviceCtrl)?;
+    xflash.send_cmd(Cmd::StartDlInfo)?;
     status_ok!(xflash);
 
-    xflash.send_cmd(Cmd::FormatPartition).await?;
+    xflash.send_cmd(Cmd::FormatPartition)?;
     // The device starts sending statuses right after sending the partition name,
     // because MTK forgot to put a status write after the command :/
     // so we have to send it manually through the port and not through send()
     let hdr = xflash.generate_header(part_name.as_bytes());
-    xflash.conn.write(&hdr).await?;
-    xflash.conn.write(part_name.as_bytes()).await?;
+    xflash.conn.write(&hdr)?;
+    xflash.conn.write(part_name.as_bytes())?;
 
     info!("Formatting partition '{}'", part_name);
 
-    xflash.progress_report(part.size, progress).await?;
+    xflash.progress_report(part.size, progress)?;
 
-    xflash.send_cmd(Cmd::DeviceCtrl).await?;
-    xflash.send_cmd(Cmd::EndDlInfo).await?;
+    xflash.send_cmd(Cmd::DeviceCtrl)?;
+    xflash.send_cmd(Cmd::EndDlInfo)?;
     status_ok!(xflash);
 
     info!("Partition '{}' formatted.", part_name);
     Ok(())
 }
 
-pub async fn set_rsc_info<F, R>(
+pub fn set_rsc_info<F, R>(
     xflash: &mut XFlash,
     part_name: &str,
     size: usize,
@@ -227,7 +228,7 @@ pub async fn set_rsc_info<F, R>(
     mut progress: F,
 ) -> Result<()>
 where
-    R: AsyncRead + Unpin,
+    R: Read,
     F: FnMut(usize, usize),
 {
     // Split in chunks of 256 bytes
@@ -253,7 +254,7 @@ where
         part_name_bytes[..name_len].copy_from_slice(&name_bytes[..name_len]);
         payload.extend_from_slice(&part_name_bytes);
 
-        let bytes_read = reader.read(&mut buffer).await?;
+        let bytes_read = reader.read(&mut buffer)?;
         if bytes_read == 0 {
             break;
         }
@@ -269,7 +270,7 @@ where
         payload.extend_from_slice(&chunk);
         assert_eq!(payload.len(), 328);
 
-        xflash.devctrl(Cmd::SetRscInfo, Some(&[&payload])).await?;
+        xflash.devctrl(Cmd::SetRscInfo, Some(&[&payload]))?;
 
         progress(offset as usize * 256 + bytes_read, size);
         offset += 1;
@@ -278,8 +279,8 @@ where
     Ok(())
 }
 
-pub async fn get_packet_length(xflash: &mut XFlash) -> Result<(usize, usize)> {
-    let packet_length = xflash.devctrl(Cmd::GetPacketLength, None).await?;
+pub fn get_packet_length(xflash: &mut XFlash) -> Result<(usize, usize)> {
+    let packet_length = xflash.devctrl(Cmd::GetPacketLength, None)?;
 
     if packet_length.len() < 8 {
         return Err(Error::proto("Received packet length is too short"));

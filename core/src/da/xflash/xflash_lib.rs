@@ -2,11 +2,10 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
+use std::io::{Read, Write};
 use std::sync::Arc;
 
 use log::{debug, error, info, trace, warn};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::time::{Duration, timeout};
 
 use crate::connection::Connection;
 use crate::connection::port::ConnectionType;
@@ -39,10 +38,10 @@ pub struct XFlash {
 }
 
 impl XFlash {
-    pub async fn send_cmd(&mut self, cmd: Cmd) -> Result<bool> {
+    pub fn send_cmd(&mut self, cmd: Cmd) -> Result<bool> {
         let cmd_bytes = (cmd as u32).to_le_bytes();
         debug!("[TX] Sending Command: 0x{:08X}", cmd as u32);
-        self.send(&cmd_bytes[..]).await
+        self.send(&cmd_bytes[..])
     }
 
     pub fn new(conn: Connection, params: DAProtocolParams) -> Self {
@@ -64,27 +63,26 @@ impl XFlash {
     // Note: When called with multiple params, this function sends data only and does not read any
     // response. For that, call read_data separately and check status manually.
     // This is to accomodate the protocol, while also not breaking read_data for other operations.
-    pub async fn devctrl(&mut self, cmd: Cmd, params: Option<&[&[u8]]>) -> Result<Vec<u8>> {
-        self.send_cmd(Cmd::DeviceCtrl).await?;
-        self.send_cmd(cmd).await?;
+    pub fn devctrl(&mut self, cmd: Cmd, params: Option<&[&[u8]]>) -> Result<Vec<u8>> {
+        self.send_cmd(Cmd::DeviceCtrl)?;
+        self.send_cmd(cmd)?;
 
         if let Some(p) = params {
-            self.send_data(p).await?;
+            self.send_data(p)?;
             return Ok(Vec::new());
         }
 
-        let read = self.read_data().await;
+        let read = self.read_data();
         status_ok!(self);
 
         read
     }
 
-    async fn read_next_flow_header(&mut self) -> Result<PacketHeader> {
+    fn read_next_flow_header(&mut self) -> Result<PacketHeader> {
         loop {
             let mut buf = [0u8; PacketHeader::SIZE];
-            timeout(Duration::from_secs(2), self.conn.read(&mut buf))
-                .await
-                .map_err(|_| Error::io("Timed out waiting for packet header"))??;
+            // Blocking read with a timeout using std (optional: implement timeout if needed)
+            self.conn.read(&mut buf)?;
 
             let hdr = PacketHeader::from_bytes(&buf).ok_or_else(|| {
                 debug!("[RX] Invalid packet header bytes: {:02X?}", buf);
@@ -93,14 +91,14 @@ impl XFlash {
 
             match hdr.data_type {
                 DataType::Flow => return Ok(hdr),
-                DataType::Message => self.drain_message(hdr.length).await?,
+                DataType::Message => self.drain_message(hdr.length)?,
             }
         }
     }
 
-    async fn drain_message(&mut self, length: u32) -> Result<()> {
+    fn drain_message(&mut self, length: u32) -> Result<()> {
         let mut payload = vec![0u8; length as usize];
-        self.conn.read(&mut payload).await?;
+        self.conn.read(&mut payload)?;
 
         let body = String::from_utf8_lossy(&payload[4..]).into_owned();
 
@@ -117,17 +115,17 @@ impl XFlash {
     // call status_ok!() macro manually.
     // This function only reads the data, and cannot be used to read status,
     // or functions like read_flash will fail.
-    pub async fn read_data(&mut self) -> Result<Vec<u8>> {
-        let hdr = self.read_next_flow_header().await?;
+    pub fn read_data(&mut self) -> Result<Vec<u8>> {
+        let hdr = self.read_next_flow_header()?;
 
         debug!("[RX] Packet header received: 0x{:X} bytes", hdr.length);
 
         let mut data = vec![0u8; hdr.length as usize];
-        self.conn.read(&mut data).await?;
+        self.conn.read(&mut data)?;
         Ok(data)
     }
 
-    pub(super) async fn upload_stage1(
+    pub(super) fn upload_stage1(
         &mut self,
         addr: u32,
         length: u32,
@@ -139,13 +137,13 @@ impl XFlash {
             addr, length
         );
 
-        self.conn.send_da(&data, length, addr, sig_len).await?;
+        self.conn.send_da(&data, length, addr, sig_len)?;
         info!("[Penumbra] Sent DA1, jumping to address 0x{:08X}...", addr);
-        self.conn.jump_da(addr).await?;
+        self.conn.jump_da(addr)?;
 
         let sync_byte = {
             let mut sync_buf = [0u8; 1];
-            match self.conn.read(&mut sync_buf).await {
+            match self.conn.read(&mut sync_buf) {
                 Ok(_) => sync_buf[0],
                 Err(e) => return Err(Error::io(e.to_string())),
             }
@@ -158,8 +156,8 @@ impl XFlash {
         }
 
         let hdr = self.generate_header(&[0u8; 4]);
-        self.conn.write(&hdr).await?;
-        self.conn.write(&(Cmd::SyncSignal as u32).to_le_bytes()).await?;
+        self.conn.write(&hdr)?;
+        self.conn.write(&(Cmd::SyncSignal as u32).to_le_bytes())?;
 
         // We can only set the environment parameters once, and for whatever reason if we set the
         // log level to DEBUG and try to send EMI settings in BROM mode, the DA hangs. This
@@ -190,39 +188,39 @@ impl XFlash {
             env_buf[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
         }
 
-        self.send_data(&[&(Cmd::SetupEnvironment as u32).to_le_bytes(), &env_buf]).await?;
+        self.send_data(&[&(Cmd::SetupEnvironment as u32).to_le_bytes(), &env_buf])?;
 
-        self.send_data(&[&(Cmd::SetupHwInitParams as u32).to_le_bytes(), &[0u8; 4]]).await?;
+        self.send_data(&[&(Cmd::SetupHwInitParams as u32).to_le_bytes(), &[0u8; 4]])?;
 
         status_any!(self, Cmd::SyncSignal as u32);
 
         info!("[Penumbra] Received DA1 sync signal.");
 
-        self.handle_emi().await?;
-        self.devctrl(Cmd::SetChecksumLevel, Some(&[&0u32.to_le_bytes()])).await?;
+        self.handle_emi()?;
+        self.devctrl(Cmd::SetChecksumLevel, Some(&[&0u32.to_le_bytes()]))?;
 
         Ok(true)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    pub(super) async fn boot_extensions(&mut self) -> Result<bool> {
+    pub(super) fn boot_extensions(&mut self) -> Result<bool> {
         if self.using_exts {
             warn!("DA extensions already in use, skipping re-upload");
             return Ok(true);
         }
         info!("Booting DA extensions...");
-        self.using_exts = boot_extensions(self).await?;
+        self.using_exts = boot_extensions(self)?;
         Ok(true)
     }
 
     // This is an internal helper, do not use it directly
-    pub(super) async fn get_or_detect_storage(&mut self) -> Option<Arc<dyn Storage>> {
-        if let Some(storage) = self.dev_info.storage().await {
+    pub(super) fn get_or_detect_storage(&mut self) -> Option<Arc<dyn Storage>> {
+        if let Some(storage) = self.dev_info.storage() {
             return Some(storage);
         }
 
-        if let Some(storage) = detect_storage(self).await {
-            self.dev_info.set_storage(storage.clone()).await;
+        if let Some(storage) = detect_storage(self) {
+            self.dev_info.set_storage(storage.clone());
             return Some(storage);
         }
 
@@ -231,25 +229,25 @@ impl XFlash {
 
     /// Receives data from the device, writing it to the provided writer.
     /// Common loop for `read_flash` and `upload`.
-    pub async fn upload_data(
+    pub fn upload_data(
         &mut self,
         size: usize,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
         let mut bytes_read = 0;
         progress(0, size);
         loop {
-            let chunk = self.read_data().await?;
+            let chunk = self.read_data()?;
             if chunk.is_empty() {
                 debug!("No data received, breaking.");
                 break;
             }
 
-            writer.write_all(&chunk).await?;
+            writer.write_all(&chunk)?;
             bytes_read += chunk.len();
 
-            self.send(&[0u8; 4]).await?;
+            self.send(&[0u8; 4])?;
 
             progress(bytes_read, size);
 
@@ -269,23 +267,23 @@ impl XFlash {
     ///
     /// If we receive less data than requested from the reader,
     /// we pad the remaining bytes with 0s and send it anyway.
-    pub async fn download_data(
+    pub fn download_data(
         &mut self,
         size: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
         let chunk_size = self.write_packet_length.unwrap_or(0x8000);
-        self.download_data_with(size, chunk_size, reader, progress).await
+        self.download_data_with(size, chunk_size, reader, progress)
     }
 
     /// Same as `download_data`, but with a custom chunk size.
     /// Useful for limiting the packet size when needed.
-    pub async fn download_data_with(
+    pub fn download_data_with(
         &mut self,
         size: usize,
         chunk_size: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
         let mut buffer = vec![0u8; chunk_size];
@@ -306,7 +304,7 @@ impl XFlash {
             let remaining = size - bytes_written;
             let to_read = remaining.min(chunk_size);
 
-            let bytes_read = reader.read(&mut buffer[..to_read]).await?;
+            let bytes_read = reader.read(&mut buffer[..to_read])?;
             let chunk = if bytes_read == 0 {
                 &buffer[..to_read]
             } else if bytes_read < to_read {
@@ -321,7 +319,7 @@ impl XFlash {
             // For whoever is reading this code and has no clue what this is doing:
             // Just sum all bytes then AND with 0xFFFF :D!!!
             let checksum = chunk.iter().fold(0u32, |total, &byte| total + byte as u32) & 0xFFFF;
-            self.send_data(&[&0u32.to_le_bytes(), &checksum.to_le_bytes(), chunk]).await?;
+            self.send_data(&[&0u32.to_le_bytes(), &checksum.to_le_bytes(), chunk])?;
 
             bytes_written += chunk.len();
             progress(bytes_written, size);
@@ -333,28 +331,28 @@ impl XFlash {
         Ok(())
     }
 
-    pub async fn progress_report(
+    pub fn progress_report(
         &mut self,
         size: usize,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
         progress(0, size);
         loop {
-            let status = self.read_data().await?;
+            let status = self.read_data()?;
             if le_u32!(status, 0) == 0x40040005 {
                 progress(size, size);
                 break;
             }
 
-            let status = self.read_data().await?;
+            let status = self.read_data()?;
             let progress_percent = le_u32!(status, 0);
 
             // The device doesn't send statuses during erase/format, so we have to send
             // an acknowledgment manually through the port and not through send()
             let ack = [0u8; 4];
             let hdr = self.generate_header(&ack);
-            self.conn.write(&hdr).await?;
-            self.conn.write(&ack).await?;
+            self.conn.write(&hdr)?;
+            self.conn.write(&ack)?;
 
             let progress_bytes = (progress_percent as usize * size) / 100;
             progress(progress_bytes, size);
@@ -369,8 +367,8 @@ impl XFlash {
         hdr.to_bytes()
     }
 
-    async fn handle_emi(&mut self) -> Result<()> {
-        let conn_agent = self.devctrl(Cmd::GetConnectionAgent, None).await?;
+    fn handle_emi(&mut self) -> Result<()> {
+        let conn_agent = self.devctrl(Cmd::GetConnectionAgent, None)?;
 
         // If the connection agent is "preloader", there's no need to upload EMI settings
         if conn_agent == b"preloader" {
@@ -386,15 +384,15 @@ impl XFlash {
             .ok_or_else(|| Error::penumbra("Failed to extract EMI settings from preloader!"))?;
 
         info!("[Penumbra] Uploading EMI settings to device...");
-        self.send_cmd(Cmd::InitExtRam).await?;
-        self.send_data(&[&(emi.len() as u32).to_le_bytes(), emi.as_slice()]).await?;
+        self.send_cmd(Cmd::InitExtRam)?;
+        self.send_data(&[&(emi.len() as u32).to_le_bytes(), emi.as_slice()])?;
         info!("[Penumbra] EMI settings uploaded successfully.");
 
         Ok(())
     }
 
-    pub(super) async fn handle_sla(&mut self) -> Result<bool> {
-        let resp = match self.devctrl(Cmd::SlaEnabledStatus, None).await {
+    pub(super) fn handle_sla(&mut self) -> Result<bool> {
+        let resp = match self.devctrl(Cmd::SlaEnabledStatus, None) {
             Ok(r) => r,
             Err(_) => {
                 // The CMD might not be supported on some devices, so we just assume SLA is disabled
@@ -421,7 +419,7 @@ impl XFlash {
             {
                 info!("No available signers for DA SLA, trying dummy signature...");
                 let dummy_sig = vec![0u8; 256];
-                if self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&dummy_sig])).await.is_ok() {
+                if self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&dummy_sig])).is_ok() {
                     info!("DA SLA signature accepted (dummy)!");
                     return Ok(true);
                 }
@@ -438,7 +436,7 @@ impl XFlash {
         const HRID_LEN: usize = 0x10;
         const SOC_ID_LEN: usize = 0x20;
 
-        let firmware_info = self.devctrl(Cmd::GetDevFwInfo, None).await?;
+        let firmware_info = self.devctrl(Cmd::GetDevFwInfo, None)?;
         debug!("Firmware Info: {:02X?}", firmware_info);
 
         let rnd = &firmware_info[HEADER..HEADER + RND_LEN];
@@ -459,9 +457,9 @@ impl XFlash {
             SignRequest { data: sign_data, purpose: SignPurpose::DaSla, pubk_mod: da2_data };
 
         info!("Found signer for DA SLA!");
-        let signed_rnd = auth.sign(&sign_req).await?;
+        let signed_rnd = auth.sign(&sign_req)?;
         info!("Signed DA SLA challenge. Uploading to device...");
-        self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&signed_rnd])).await?;
+        self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&signed_rnd]))?;
         info!("DA SLA signature accepted!");
         Ok(true)
     }

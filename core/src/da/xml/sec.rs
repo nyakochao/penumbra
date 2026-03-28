@@ -8,14 +8,14 @@ use crate::core::seccfg::{SecCfgV4, SecCfgV4Algo};
 use crate::da::xml::exts::sej;
 use crate::da::{DownloadProtocol, Xml};
 
-pub async fn parse_seccfg(xml: &mut Xml) -> Option<SecCfgV4> {
-    let seccfg = xml.dev_info.get_partition("seccfg").await?;
+pub fn parse_seccfg(xml: &mut Xml) -> Option<SecCfgV4> {
+    let seccfg = xml.dev_info.get_partition("seccfg")?;
     let mut progress = |_, _| {};
 
     let mut seccfg_header = Vec::with_capacity(seccfg.size);
     let mut cursor = Cursor::new(&mut seccfg_header);
 
-    xml.upload("seccfg".to_string(), &mut cursor, &mut progress).await.ok()?;
+    xml.upload("seccfg".to_string(), &mut cursor, &mut progress).ok()?;
 
     // Cut to 200 bytes
     seccfg_header.truncate(200);
@@ -24,10 +24,10 @@ pub async fn parse_seccfg(xml: &mut Xml) -> Option<SecCfgV4> {
     let hash = parsed_seccfg.get_encrypted_hash();
     for algo in [SecCfgV4Algo::SW, SecCfgV4Algo::HW, SecCfgV4Algo::HWv3, SecCfgV4Algo::HWv4] {
         let dec_hash = match algo {
-            SecCfgV4Algo::SW => sej(xml, &hash, false, false, false, false).await.ok()?,
-            SecCfgV4Algo::HW => sej(xml, &hash, false, false, true, true).await.ok()?,
-            SecCfgV4Algo::HWv3 => sej(xml, &hash, false, true, true, false).await.ok()?,
-            SecCfgV4Algo::HWv4 => sej(xml, &hash, false, false, true, false).await.ok()?,
+            SecCfgV4Algo::SW => sej(xml, &hash, false, false, false, false).ok()?,
+            SecCfgV4Algo::HW => sej(xml, &hash, false, false, true, true).ok()?,
+            SecCfgV4Algo::HWv3 => sej(xml, &hash, false, true, true, false).ok()?,
+            SecCfgV4Algo::HWv4 => sej(xml, &hash, false, false, true, false).ok()?,
         };
         if dec_hash == parsed_seccfg.get_hash() {
             parsed_seccfg.set_algo(algo);
@@ -38,20 +38,12 @@ pub async fn parse_seccfg(xml: &mut Xml) -> Option<SecCfgV4> {
     None
 }
 
-pub async fn write_seccfg(xml: &mut Xml, seccfg: &mut SecCfgV4) -> Option<Vec<u8>> {
+pub fn write_seccfg(xml: &mut Xml, seccfg: &mut SecCfgV4) -> Option<Vec<u8>> {
     let enc_hash = match seccfg.get_algo() {
-        Some(SecCfgV4Algo::SW) => {
-            sej(xml, &seccfg.get_hash(), true, false, false, false).await.ok()?
-        }
-        Some(SecCfgV4Algo::HW) => {
-            sej(xml, &seccfg.get_hash(), true, false, true, true).await.ok()?
-        }
-        Some(SecCfgV4Algo::HWv3) => {
-            sej(xml, &seccfg.get_hash(), true, true, true, false).await.ok()?
-        }
-        Some(SecCfgV4Algo::HWv4) => {
-            sej(xml, &seccfg.get_hash(), true, false, true, false).await.ok()?
-        }
+        Some(SecCfgV4Algo::SW) => sej(xml, &seccfg.get_hash(), true, false, false, false).ok()?,
+        Some(SecCfgV4Algo::HW) => sej(xml, &seccfg.get_hash(), true, false, true, true).ok()?,
+        Some(SecCfgV4Algo::HWv3) => sej(xml, &seccfg.get_hash(), true, true, true, false).ok()?,
+        Some(SecCfgV4Algo::HWv4) => sej(xml, &seccfg.get_hash(), true, false, true, false).ok()?,
         _ => return None,
     };
 
@@ -61,7 +53,7 @@ pub async fn write_seccfg(xml: &mut Xml, seccfg: &mut SecCfgV4) -> Option<Vec<u8
     let mut progress = |_, _| {};
     let mut cursor = Cursor::new(&seccfg_data);
 
-    xml.download("seccfg".to_string(), 200, &mut cursor, &mut progress).await.ok()?;
+    xml.download("seccfg".to_string(), 200, &mut cursor, &mut progress).ok()?;
 
     Some(seccfg_data)
 }

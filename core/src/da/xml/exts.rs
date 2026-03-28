@@ -2,10 +2,9 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
-use std::io::Cursor;
+use std::io::{Cursor, Read, Write};
 
 use log::{debug, info};
-use tokio::io::{AsyncRead, AsyncWrite};
 use xmlcmd_derive::XmlCommand;
 
 use crate::core::storage::{RPMB_FRAME_DATA_SZ, RpmbRegion, StorageType};
@@ -102,7 +101,7 @@ pub struct ExtRpmbWrite {
     sectors_count: u32,
 }
 
-pub async fn boot_extensions(xml: &mut Xml) -> Result<bool> {
+pub fn boot_extensions(xml: &mut Xml) -> Result<bool> {
     let ext_data = match prepare_extensions(xml) {
         Some(data) => data,
         None => {
@@ -118,7 +117,7 @@ pub async fn boot_extensions(xml: &mut Xml) -> Result<bool> {
 
     info!("Uploading XML extensions to 0x{:08X} (0x{:X} bytes)", ext_addr, ext_size);
 
-    let boot_to_resp = xml.boot_to(ext_addr, &ext_data).await.unwrap_or(false);
+    let boot_to_resp = xml.boot_to(ext_addr, &ext_data).unwrap_or(false);
     if !boot_to_resp {
         info!("Failed to upload XML extensions, continuing without extensions");
         return Ok(false);
@@ -129,16 +128,16 @@ pub async fn boot_extensions(xml: &mut Xml) -> Result<bool> {
         return Ok(false);
     }
 
-    let response = match xml.get_upload_file_resp().await {
+    let response = match xml.get_upload_file_resp() {
         Ok(resp) => resp,
         Err(_) => {
-            xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+            xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
             info!("Failed to get extension ack response, continuing without extensions");
             return Ok(false);
         }
     };
 
-    xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+    xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
     let ack: String = get_tag(&response, "status")?;
     if ack != "OK" {
@@ -150,7 +149,7 @@ pub async fn boot_extensions(xml: &mut Xml) -> Result<bool> {
     let tzcc_base = xml.chip().tzcc_base();
     let da2_base = xml.da.get_da2().map(|da2| da2.addr).unwrap_or(0);
     let da2_size = xml.da.get_da2().map(|da2| da2.data.len() as u32).unwrap_or(0);
-    let storage = match xml.get_storage().await {
+    let storage = match xml.get_storage() {
         Some(s) => match s.kind() {
             StorageType::Emmc => "EMMC".to_string(),
             StorageType::Ufs => "UFS".to_string(),
@@ -226,11 +225,11 @@ fn prepare_extensions(xml: &Xml) -> Option<Vec<u8>> {
     Some(da_ext_data)
 }
 
-pub async fn peek<F>(
+pub fn peek<F>(
     xml: &mut Xml,
     addr: u32,
     length: usize,
-    writer: &mut (dyn AsyncWrite + Unpin + Send),
+    writer: &mut (dyn Write + Send),
     mut progress: F,
 ) -> Result<()>
 where
@@ -238,18 +237,18 @@ where
 {
     xmlcmd!(xml, ExtReadMem, addr, length)?;
 
-    xml.upload_file(writer, &mut progress).await?;
+    xml.upload_file(writer, &mut progress)?;
 
-    xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+    xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
     Ok(())
 }
 
-pub async fn poke<F>(
+pub fn poke<F>(
     xml: &mut Xml,
     addr: u32,
     length: usize,
-    reader: &mut (dyn AsyncRead + Unpin + Send),
+    reader: &mut (dyn Read + Send),
     mut progress: F,
 ) -> Result<()>
 where
@@ -257,14 +256,14 @@ where
 {
     xmlcmd!(xml, ExtWriteMem, addr, length)?;
 
-    xml.download_file(length, reader, &mut progress).await?;
+    xml.download_file(length, reader, &mut progress)?;
 
-    xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+    xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
     Ok(())
 }
 
-pub async fn sej(
+pub fn sej(
     xml: &mut Xml,
     data: &[u8],
     encrypt: bool,
@@ -284,19 +283,19 @@ pub async fn sej(
     let mut cursor = Cursor::new(&mut buf);
     let mut progress = |_: usize, _: usize| {};
 
-    xml.download_file(length as usize, &mut cursor, &mut progress).await?;
+    xml.download_file(length as usize, &mut cursor, &mut progress)?;
     cursor.set_position(0);
-    xml.upload_file(&mut cursor, &mut progress).await?;
+    xml.upload_file(&mut cursor, &mut progress)?;
 
-    xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+    xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
     Ok(buf)
 }
 
-async fn init_rpmb(xml: &mut Xml, region: RpmbRegion) -> Result<()> {
+fn init_rpmb(xml: &mut Xml, region: RpmbRegion) -> Result<()> {
     // Derive RPMB key (0 = RPMB)
     xmlcmd!(xml, ExtKeyDerive, "RPMB")?;
-    let resp = xml.get_upload_file_resp().await?;
+    let resp = xml.get_upload_file_resp()?;
     let key: String = get_tag(&resp, "key")?;
 
     // If the RPMB is already initialized (even with another key), this will succeed
@@ -306,20 +305,20 @@ async fn init_rpmb(xml: &mut Xml, region: RpmbRegion) -> Result<()> {
     Ok(())
 }
 
-pub async fn read_rpmb<F>(
+pub fn read_rpmb<F>(
     xml: &mut Xml,
     region: RpmbRegion,
     start_sector: u32,
     sectors_count: u32,
-    writer: &mut (dyn AsyncWrite + Unpin + Send),
+    writer: &mut (dyn Write + Send),
     mut progress: F,
 ) -> Result<()>
 where
     F: FnMut(usize, usize) + Send,
 {
-    init_rpmb(xml, region).await?;
+    init_rpmb(xml, region)?;
 
-    let storage = match xml.get_storage().await {
+    let storage = match xml.get_storage() {
         Some(s) => s,
         None => {
             return Err(Error::penumbra("Failed to get storage information for RPMB read"));
@@ -333,26 +332,26 @@ where
     }
 
     xmlcmd!(xml, ExtRpmbRead, region as u32, start_sector, sectors_count)?;
-    xml.upload_file(writer, &mut progress).await?;
-    xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+    xml.upload_file(writer, &mut progress)?;
+    xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
     Ok(())
 }
 
-pub async fn write_rpmb<F>(
+pub fn write_rpmb<F>(
     xml: &mut Xml,
     region: RpmbRegion,
     start_sector: u32,
     sectors_count: u32,
-    reader: &mut (dyn AsyncRead + Unpin + Send),
+    reader: &mut (dyn Read + Send),
     mut progress: F,
 ) -> Result<()>
 where
     F: FnMut(usize, usize) + Send,
 {
-    init_rpmb(xml, region).await?;
+    init_rpmb(xml, region)?;
 
-    let storage = match xml.get_storage().await {
+    let storage = match xml.get_storage() {
         Some(s) => s,
         None => {
             return Err(Error::penumbra("Failed to get storage information for RPMB write"));
@@ -368,13 +367,13 @@ where
     let data_len = sectors_count as usize * RPMB_FRAME_DATA_SZ;
 
     xmlcmd!(xml, ExtRpmbWrite, region as u32, start_sector, sectors_count)?;
-    xml.download_file(data_len, reader, &mut progress).await?;
-    xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+    xml.download_file(data_len, reader, &mut progress)?;
+    xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
     Ok(())
 }
 
-pub async fn auth_rpmb(xml: &mut Xml, region: RpmbRegion, key: &[u8]) -> Result<()> {
+pub fn auth_rpmb(xml: &mut Xml, region: RpmbRegion, key: &[u8]) -> Result<()> {
     let key = bytes_to_hex(key);
     xmlcmd_e!(xml, ExtRpmbInit, region as u32, key)?;
 

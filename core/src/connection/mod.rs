@@ -5,10 +5,8 @@
 mod backend;
 mod command;
 pub mod port;
-use std::time::Duration;
 
 use log::{debug, error, info};
-use tokio::time::timeout;
 
 use crate::connection::command::Command;
 use crate::connection::port::{ConnectionType, MTKPort};
@@ -30,37 +28,37 @@ impl Connection {
     }
 
     // Writes the provided data to the device
-    pub async fn write(&mut self, data: &[u8]) -> Result<()> {
-        self.port.write_all(data).await
+    pub fn write(&mut self, data: &[u8]) -> Result<()> {
+        self.port.write_all(data)
     }
 
     // Reads the exact number of bytes required to fill the provided buffer
-    pub async fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
-        self.port.read_exact(buf).await
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        self.port.read_exact(buf)
     }
 
     // Reads the specified number of bytes
-    pub async fn read_bytes(&mut self, size: usize) -> Result<Vec<u8>> {
+    pub fn read_bytes(&mut self, size: usize) -> Result<Vec<u8>> {
         let mut buf = vec![0u8; size];
-        self.port.read_exact(&mut buf).await?;
+        self.port.read_exact(&mut buf)?;
         Ok(buf)
     }
 
-    async fn read_u16_be(&mut self) -> Result<u16> {
+    fn read_u16_be(&mut self) -> Result<u16> {
         let mut buf = [0u8; 2];
-        self.port.read_exact(&mut buf).await?;
+        self.port.read_exact(&mut buf)?;
         Ok(u16::from_be_bytes(buf))
     }
 
-    async fn read_u16_le(&mut self) -> Result<u16> {
+    fn read_u16_le(&mut self) -> Result<u16> {
         let mut buf = [0u8; 2];
-        self.port.read_exact(&mut buf).await?;
+        self.port.read_exact(&mut buf)?;
         Ok(u16::from_le_bytes(buf))
     }
 
-    async fn read_u32_be(&mut self) -> Result<u32> {
+    fn read_u32_be(&mut self) -> Result<u32> {
         let mut buf = [0u8; 4];
-        self.port.read_exact(&mut buf).await?;
+        self.port.read_exact(&mut buf)?;
         Ok(u32::from_be_bytes(buf))
     }
 
@@ -73,29 +71,29 @@ impl Connection {
         }
     }
 
-    pub async fn echo(&mut self, data: &[u8], size: usize) -> Result<()> {
-        self.write(data).await?;
+    pub fn echo(&mut self, data: &[u8], size: usize) -> Result<()> {
+        self.write(data)?;
         let mut buf = vec![0u8; size];
-        self.read(&mut buf).await?;
+        self.read(&mut buf)?;
         self.check(&buf, data)
     }
 
     /* BROM / Preloader download handlers below :D */
 
-    pub async fn handshake(&mut self) -> Result<()> {
+    pub fn handshake(&mut self) -> Result<()> {
         info!("Starting handshake...");
-        self.port.handshake().await?;
+        self.port.handshake()?;
         info!("Handshake completed!");
         Ok(())
     }
 
-    pub async fn jump_da(&mut self, address: u32) -> Result<()> {
+    pub fn jump_da(&mut self, address: u32) -> Result<()> {
         debug!("Jump to DA at 0x{:08X}", address);
 
-        self.echo(&[Command::JumpDa as u8], 1).await?;
-        self.echo(&address.to_be_bytes(), 4).await?;
+        self.echo(&[Command::JumpDa as u8], 1)?;
+        self.echo(&address.to_be_bytes(), 4)?;
 
-        let status = self.read_u16_le().await?;
+        let status = self.read_u16_le()?;
         if status != 0 {
             error!("JumpDA failed with status: {:04X}", status);
             return Err(Error::conn("JumpDA failed"));
@@ -104,7 +102,7 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn send_da(
+    pub fn send_da(
         &mut self,
         da_data: &[u8],
         da_len: u32,
@@ -112,12 +110,12 @@ impl Connection {
         sig_len: u32,
     ) -> Result<()> {
         debug!("Sending DA, size: {}", da_data.len());
-        self.echo(&[Command::SendDa as u8], 1).await?;
-        self.echo(&address.to_be_bytes(), 4).await?;
-        self.echo(&(da_len).to_be_bytes(), 4).await?;
-        self.echo(&sig_len.to_be_bytes(), 4).await?;
+        self.echo(&[Command::SendDa as u8], 1)?;
+        self.echo(&address.to_be_bytes(), 4)?;
+        self.echo(&(da_len).to_be_bytes(), 4)?;
+        self.echo(&sig_len.to_be_bytes(), 4)?;
 
-        let status = self.read_u16_be().await?;
+        let status = self.read_u16_be()?;
         debug!("Received status: 0x{:04X}", status);
 
         if status != 0 {
@@ -125,14 +123,14 @@ impl Connection {
             return Err(Error::conn("SendDA command failed"));
         }
 
-        self.port.write_all(da_data).await?;
+        self.port.write_all(da_data)?;
 
         debug!("DA sent!");
 
-        let checksum = self.read_u16_be().await?;
+        let checksum = self.read_u16_be()?;
         debug!("Received checksum: 0x{:04X}", checksum);
 
-        let status = self.read_u16_be().await?;
+        let status = self.read_u16_be()?;
         debug!("Received final status: 0x{:04X}", status);
         if status != 0 {
             error!("SendDA data transfer failed with status: {:04X}", status);
@@ -142,11 +140,11 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn get_hw_code(&mut self) -> Result<u16> {
-        self.echo(&[Command::GetHwCode as u8], 1).await?;
+    pub fn get_hw_code(&mut self) -> Result<u16> {
+        self.echo(&[Command::GetHwCode as u8], 1)?;
 
-        let hw_code = self.read_u16_be().await?;
-        let status = self.read_u16_le().await?;
+        let hw_code = self.read_u16_be()?;
+        let status = self.read_u16_le()?;
 
         if status != 0 {
             error!("GetHwCode failed with status: {:04X}", status);
@@ -156,13 +154,13 @@ impl Connection {
         Ok(hw_code)
     }
 
-    pub async fn get_hw_sw_ver(&mut self) -> Result<(u16, u16, u16)> {
-        self.echo(&[Command::GetHwSwVer as u8], 1).await?;
+    pub fn get_hw_sw_ver(&mut self) -> Result<(u16, u16, u16)> {
+        self.echo(&[Command::GetHwSwVer as u8], 1)?;
 
-        let hw_sub_code = self.read_u16_le().await?;
-        let hw_ver = self.read_u16_le().await?;
-        let sw_ver = self.read_u16_le().await?;
-        let status = self.read_u16_le().await?;
+        let hw_sub_code = self.read_u16_le()?;
+        let hw_ver = self.read_u16_le()?;
+        let sw_ver = self.read_u16_le()?;
+        let status = self.read_u16_le()?;
 
         if status != 0 {
             error!("GetHwSwVer failed with status: 0x{:04X}", status);
@@ -172,26 +170,25 @@ impl Connection {
         Ok((hw_sub_code, hw_ver, sw_ver))
     }
 
-    pub async fn get_soc_id(&mut self) -> Result<Vec<u8>> {
-        self.echo(&[Command::GetSocId as u8], 1).await?;
+    pub fn get_soc_id(&mut self) -> Result<Vec<u8>> {
+        self.echo(&[Command::GetSocId as u8], 1)?;
 
         let mut length_bytes = [0u8; 4];
 
-        let read_result =
-            timeout(Duration::from_millis(500), self.port.read_exact(&mut length_bytes)).await;
+        // Synchronous version: just read, no timeout
+        let read_result = self.port.read_exact(&mut length_bytes);
 
         let length_bytes = match read_result {
-            Ok(Ok(_)) => length_bytes,
-            Ok(Err(e)) => return Err(e), // I/O error
-            Err(_) => return Ok(vec![]), // Timeout -> no SocId available
+            Ok(_) => length_bytes,
+            Err(e) => return Err(e), // I/O error
         };
 
         let length = u32::from_be_bytes(length_bytes) as usize;
 
         let mut soc_id = vec![0u8; length];
-        self.port.read_exact(&mut soc_id).await?;
+        self.port.read_exact(&mut soc_id)?;
 
-        let status = self.read_u16_le().await?;
+        let status = self.read_u16_le()?;
 
         if status != 0 {
             error!("GetSocId failed with status: 0x{:04X}", status);
@@ -201,11 +198,11 @@ impl Connection {
         Ok(soc_id)
     }
 
-    pub async fn get_meid(&mut self) -> Result<Vec<u8>> {
-        self.port.write_all(&[Command::GetMeId as u8]).await?;
+    pub fn get_meid(&mut self) -> Result<Vec<u8>> {
+        self.port.write_all(&[Command::GetMeId as u8])?;
 
         let mut echo = [0u8; 1];
-        self.port.read_exact(&mut echo).await?;
+        self.port.read_exact(&mut echo)?;
 
         // IQO Preloader seems to have a custom security gate that blocks most commands
         // behind an OEM authentication challenge (0x90/0x91). Only a small whitelist of
@@ -224,21 +221,19 @@ impl Connection {
 
         let mut length_bytes = [0u8; 4];
 
-        let read_result =
-            timeout(Duration::from_millis(500), self.port.read_exact(&mut length_bytes)).await;
+        let read_result = self.port.read_exact(&mut length_bytes);
 
         let length_bytes = match read_result {
-            Ok(Ok(_)) => length_bytes,
-            Ok(Err(e)) => return Err(e), // I/O error
-            Err(_) => return Ok(vec![]), // Device did not reply -> no MEID support
+            Ok(_) => length_bytes,
+            Err(e) => return Err(e), // I/O error
         };
 
         let length = u32::from_be_bytes(length_bytes) as usize;
 
         let mut meid = vec![0u8; length];
-        self.port.read_exact(&mut meid).await?;
+        self.port.read_exact(&mut meid)?;
 
-        let status = self.read_u16_le().await?;
+        let status = self.read_u16_le()?;
 
         if status != 0 {
             error!("GetMeid failed with status: 0x{:04X}", status);
@@ -254,11 +249,11 @@ impl Connection {
     /// SBC = target_config & 0x1
     /// SLA = target_config & 0x2
     /// DAA = target_config & 0x4
-    pub async fn get_target_config(&mut self) -> Result<u32> {
-        self.echo(&[Command::GetTargetConfig as u8], 1).await?;
+    pub fn get_target_config(&mut self) -> Result<u32> {
+        self.echo(&[Command::GetTargetConfig as u8], 1)?;
 
-        let config = self.read_u32_be().await?;
-        let status = self.read_u16_le().await?;
+        let config = self.read_u32_be()?;
+        let status = self.read_u16_le()?;
 
         if status != 0 {
             error!("GetTargetConfig failed with status: 0x{:04X}", status);
@@ -268,34 +263,34 @@ impl Connection {
         Ok(config)
     }
 
-    pub async fn get_pl_capabilities(&mut self) -> Result<u32> {
-        self.echo(&[Command::GetPlCap as u8], 1).await?;
+    pub fn get_pl_capabilities(&mut self) -> Result<u32> {
+        self.echo(&[Command::GetPlCap as u8], 1)?;
 
-        let cap0 = self.read_u32_be().await?;
-        let _cap1 = self.read_u32_be().await?; // Reserved
+        let cap0 = self.read_u32_be()?;
+        let _cap1 = self.read_u32_be()?; // Reserved
 
         Ok(cap0)
     }
 
     /// Reads memory from the device with size, split into 4-byte chunks.
-    pub async fn read32(&mut self, address: u32, size: usize) -> Result<Vec<u8>> {
+    pub fn read32(&mut self, address: u32, size: usize) -> Result<Vec<u8>> {
         let aligned = size.div_ceil(4) * 4;
 
-        self.echo(&[Command::Read32 as u8], 1).await?;
-        self.echo(&address.to_be_bytes(), 4).await?;
-        self.echo(&((aligned / 4) as u32).to_be_bytes(), 4).await?;
+        self.echo(&[Command::Read32 as u8], 1)?;
+        self.echo(&address.to_be_bytes(), 4)?;
+        self.echo(&((aligned / 4) as u32).to_be_bytes(), 4)?;
 
-        let status = self.read_u16_be().await?;
+        let status = self.read_u16_be()?;
         if status != 0 {
             return Err(Error::conn(format!("Read32 failed with status: 0x{:04X}", status)));
         }
 
         let mut data = vec![0u8; aligned];
         for chunk in data.chunks_mut(4) {
-            self.port.read_exact(chunk).await?;
+            self.port.read_exact(chunk)?;
         }
 
-        let status = self.read_u16_be().await?;
+        let status = self.read_u16_be()?;
         if status != 0 {
             return Err(Error::conn(format!("Read32 failed with status: 0x{:04X}", status)));
         }

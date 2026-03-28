@@ -2,7 +2,6 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
-use std::sync::PoisonError;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use thiserror::Error;
@@ -26,6 +25,12 @@ pub enum Error {
     /// In particular with the connection backends
     #[error("I/O Error: {0}")]
     Io(String),
+    /// Error specific related to timeouts.
+    /// Use this preferrably over the generic Io error when
+    /// dealing with timeouts, so that we can handle them
+    /// separately.
+    #[error("Timeout")]
+    Timeout,
     /// Generic error that happens in Penumbra, can
     /// be used for anything
     #[error("Penumbra Error: {0}")]
@@ -62,15 +67,10 @@ impl From<std::io::Error> for Error {
     }
 }
 
+#[cfg(feature = "nusb")]
 impl From<nusb::Error> for Error {
     fn from(err: nusb::Error) -> Self {
         Error::io(err.to_string())
-    }
-}
-
-impl<T> From<PoisonError<T>> for Error {
-    fn from(e: PoisonError<T>) -> Self {
-        Error::penumbra(format!("Lock poisoned: {}", e))
     }
 }
 

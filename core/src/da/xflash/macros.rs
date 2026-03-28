@@ -5,7 +5,7 @@
 
 macro_rules! status {
     ($self:ident, $expected:expr, $msg:expr) => {{
-        let status = $self.get_status().await?;
+        let status = $self.get_status()?;
         if status != $expected {
             let xflash_err = crate::error::XFlashError::from_code(status);
             log::error!("{}: 0x{:08X} ({})", $msg, status, xflash_err);
@@ -14,7 +14,7 @@ macro_rules! status {
     }};
 
     ($self:ident, $expected:expr) => {{
-        let status = $self.get_status().await?;
+        let status = $self.get_status()?;
         if status != $expected {
             let xflash_err = crate::error::XFlashError::from_code(status);
             log::error!("Status is not expected: 0x{:08X} ({})", status, xflash_err);
@@ -34,7 +34,7 @@ macro_rules! status_ok {
 
 macro_rules! status_any {
     ($self:ident, $($valid:expr),+ $(,)?) => {{
-        let status = $self.get_status().await?;
+        let status = $self.get_status()?;
         if ![$($valid),+].contains(&status) {
             let xflash_err = XFlashError::from_code(status);
             error!("Status is not expected: 0x{:08X} ({})", status, xflash_err);

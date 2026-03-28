@@ -2,12 +2,10 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
-use std::io::Cursor;
+use std::io::{BufReader, Cursor, Read, Write};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use log::{debug, error, info};
-use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 
 use crate::connection::Connection;
 use crate::connection::port::ConnectionType;
@@ -35,13 +33,11 @@ use crate::exploit;
 #[cfg(not(feature = "no_exploits"))]
 use crate::exploit::{Carbonara, Exploit, HeapBait};
 
-#[async_trait]
 impl DownloadProtocol for Xml {
-    async fn upload_da(&mut self) -> Result<bool> {
+    fn upload_da(&mut self) -> Result<bool> {
         let da1 = self.da.get_da1().ok_or_else(|| Error::penumbra("DA1 region not found"))?;
 
         self.upload_stage1(da1.addr, da1.length, da1.data.clone(), da1.sig_len)
-            .await
             .map_err(|e| Error::proto(format!("Failed to upload XML DA1: {e}")))?;
 
         exploit!(Carbonara, self);
@@ -54,8 +50,8 @@ impl DownloadProtocol for Xml {
         };
 
         info!("Uploading and booting to XML DA2...");
-        if let Err(e) = self.boot_to(da2_addr, &da2_data).await {
-            self.reboot(BootMode::Normal).await.ok();
+        if let Err(e) = self.boot_to(da2_addr, &da2_data) {
+            self.reboot(BootMode::Normal).ok();
             return Err(Error::proto(format!("Failed to upload XML DA2: {e}")));
         }
 
@@ -63,50 +59,50 @@ impl DownloadProtocol for Xml {
 
         exploit!(HeapBait, self);
 
-        // These may fail on some devices — safe to ignore
+        // These may fail on some devices
         xmlcmd_e!(self, HostSupportedCommands, HOST_CMDS).ok();
 
         xmlcmd!(self, NotifyInitHw)?;
         let mut mock_progress = |_, _| {};
-        self.progress_report(&mut mock_progress).await?;
-        self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+        self.progress_report(&mut mock_progress)?;
+        self.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
-        self.handle_sla().await?;
+        self.handle_sla()?;
 
         #[cfg(not(feature = "no_exploits"))]
-        self.boot_extensions().await?;
+        self.boot_extensions()?;
 
         Ok(true)
     }
 
-    async fn boot_to(&mut self, addr: u32, data: &[u8]) -> Result<bool> {
+    fn boot_to(&mut self, addr: u32, data: &[u8]) -> Result<bool> {
         xmlcmd!(self, BootTo, addr, addr, 0x0u64, data.len() as u64)?;
 
         let reader = BufReader::new(Cursor::new(data));
         let mut progress = |_, _| {};
-        self.download_file(data.len(), reader, &mut progress).await?;
+        self.download_file(data.len(), reader, &mut progress)?;
 
-        self.lifetime_ack(XmlCmdLifetime::CmdEnd).await?;
+        self.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
         Ok(true)
     }
 
-    async fn send(&mut self, data: &[u8]) -> Result<bool> {
-        self.send_data(&[data]).await
+    fn send(&mut self, data: &[u8]) -> Result<bool> {
+        self.send_data(&[data])
     }
 
-    async fn send_data(&mut self, data: &[&[u8]]) -> Result<bool> {
+    fn send_data(&mut self, data: &[&[u8]]) -> Result<bool> {
         let max_chunk_size = self.write_packet_length.unwrap_or(0x8000);
 
         for param in data {
             let hdr = self.generate_header(param);
-            self.conn.write(&hdr).await?;
+            self.conn.write(&hdr)?;
 
             let mut pos = 0;
             while pos < param.len() {
                 let end = (pos + max_chunk_size).min(param.len());
                 let chunk = &param[pos..end];
                 debug!("[TX] Sending chunk (0x{:X} bytes)", chunk.len());
-                self.conn.write(chunk).await?;
+                self.conn.write(chunk)?;
                 pos = end;
             }
 
@@ -117,11 +113,11 @@ impl DownloadProtocol for Xml {
     }
 
     /// We don't need it for XML DA
-    async fn get_status(&mut self) -> Result<u32> {
+    fn get_status(&mut self) -> Result<u32> {
         Ok(0)
     }
 
-    async fn shutdown(&mut self) -> Result<()> {
+    fn shutdown(&mut self) -> Result<()> {
         info!("Shutting down device...");
 
         xmlcmd_e!(self, Reboot, "IMMEDIATE".to_string())
@@ -129,10 +125,10 @@ impl DownloadProtocol for Xml {
             .map_err(|e| Error::proto(format!("Failed to shutdown device: {e}")))
     }
 
-    async fn reboot(&mut self, bootmode: BootMode) -> Result<()> {
+    fn reboot(&mut self, bootmode: BootMode) -> Result<()> {
         info!("Rebooting device into {:?} mode...", bootmode);
         match bootmode {
-            BootMode::Normal | BootMode::HomeScreen => self.shutdown().await?,
+            BootMode::Normal | BootMode::HomeScreen => self.shutdown()?,
             mode => {
                 let xml_mode = mode.to_text().unwrap();
                 xmlcmd_e!(self, SetBootMode, xml_mode.to_string(), "USB", "ON", "ON")?;
@@ -142,74 +138,74 @@ impl DownloadProtocol for Xml {
         Ok(())
     }
 
-    async fn read_flash(
+    fn read_flash(
         &mut self,
         addr: u64,
         size: usize,
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn Write + Send),
     ) -> Result<()> {
-        flash::read_flash(self, addr, size, section, writer, progress).await
+        flash::read_flash(self, addr, size, section, writer, progress)
     }
 
-    async fn write_flash(
+    fn write_flash(
         &mut self,
         addr: u64,
         size: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::write_flash(self, addr, size, section, reader, progress).await
+        flash::write_flash(self, addr, size, section, reader, progress)
     }
 
-    async fn erase_flash(
+    fn erase_flash(
         &mut self,
         addr: u64,
         size: usize,
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::erase_flash(self, addr, size, section, progress).await
+        flash::erase_flash(self, addr, size, section, progress)
     }
 
-    async fn download(
+    fn download(
         &mut self,
         part_name: String,
         size: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::download(self, part_name, size, reader, progress).await
+        flash::download(self, part_name, size, reader, progress)
     }
 
-    async fn upload(
+    fn upload(
         &mut self,
         part_name: String,
-        reader: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::upload(self, part_name, reader, progress).await
+        flash::upload(self, part_name, writer, progress)
     }
 
-    async fn format(
+    fn format(
         &mut self,
         part_name: String,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::format(self, part_name, progress).await
+        flash::format(self, part_name, progress)
     }
 
-    async fn read32(&mut self, _addr: u32) -> Result<u32> {
+    fn read32(&mut self, _addr: u32) -> Result<u32> {
         todo!()
     }
 
-    async fn write32(&mut self, _addr: u32, _value: u32) -> Result<()> {
+    fn write32(&mut self, _addr: u32, _value: u32) -> Result<()> {
         todo!()
     }
 
-    async fn get_usb_speed(&mut self) -> Result<u32> {
+    fn get_usb_speed(&mut self) -> Result<u32> {
         todo!()
     }
 
@@ -222,16 +218,16 @@ impl DownloadProtocol for Xml {
         Ok(())
     }
 
-    async fn get_storage(&mut self) -> Option<Arc<dyn Storage>> {
-        self.get_or_detect_storage().await
+    fn get_storage(&mut self) -> Option<Arc<dyn Storage>> {
+        self.get_or_detect_storage()
     }
 
-    async fn get_storage_type(&mut self) -> StorageType {
-        self.get_or_detect_storage().await.map_or(StorageType::Unknown, |s| s.kind())
+    fn get_storage_type(&mut self) -> StorageType {
+        self.get_or_detect_storage().map_or(StorageType::Unknown, |s| s.kind())
     }
 
-    async fn get_partitions(&mut self) -> Vec<Partition> {
-        let storage = match self.get_storage().await {
+    fn get_partitions(&mut self) -> Vec<Partition> {
+        let storage = match self.get_storage() {
             Some(s) => s,
             None => {
                 error!("[Penumbra] Failed to get storage for partition parsing");
@@ -260,7 +256,7 @@ impl DownloadProtocol for Xml {
 
         let mut pgpt_data = Vec::new();
         let mut pgpt_cursor = Cursor::new(&mut pgpt_data);
-        self.upload("PGPT".into(), &mut pgpt_cursor, &mut progress).await.ok();
+        self.upload("PGPT".into(), &mut pgpt_cursor, &mut progress).ok();
         let parsed_gpt_parts =
             Gpt::parse(&pgpt_data, storage_type).map(|g| g.partitions()).unwrap_or_default();
 
@@ -269,7 +265,7 @@ impl DownloadProtocol for Xml {
         } else {
             let mut sgpt_data = Vec::new();
             let mut sgpt_cursor = Cursor::new(&mut sgpt_data);
-            self.upload("SGPT".into(), &mut sgpt_cursor, &mut progress).await.ok();
+            self.upload("SGPT".into(), &mut sgpt_cursor, &mut progress).ok();
             Gpt::parse(&sgpt_data, storage_type).map(|g| g.partitions()).unwrap_or_default()
         };
 
@@ -280,8 +276,8 @@ impl DownloadProtocol for Xml {
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>> {
-        let mut seccfg = match parse_seccfg(self).await {
+    fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>> {
+        let mut seccfg = match parse_seccfg(self) {
             Some(s) => s,
             None => {
                 error!("[Penumbra] Failed to parse seccfg, cannot set lock state");
@@ -290,58 +286,58 @@ impl DownloadProtocol for Xml {
         };
 
         seccfg.set_lock_state(locked);
-        write_seccfg(self, &mut seccfg).await
+        write_seccfg(self, &mut seccfg)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn peek(
+    fn peek(
         &mut self,
         addr: u32,
         length: usize,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        exts::peek(self, addr, length, writer, progress).await
+        exts::peek(self, addr, length, writer, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn poke(
+    fn poke(
         &mut self,
         addr: u32,
         length: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        exts::poke(self, addr, length, reader, progress).await
+        exts::poke(self, addr, length, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn read_rpmb(
+    fn read_rpmb(
         &mut self,
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        exts::read_rpmb(self, region, start_sector, sectors_count, writer, progress).await
+        exts::read_rpmb(self, region, start_sector, sectors_count, writer, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn write_rpmb(
+    fn write_rpmb(
         &mut self,
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        exts::write_rpmb(self, region, start_sector, sectors_count, reader, progress).await
+        exts::write_rpmb(self, region, start_sector, sectors_count, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn auth_rpmb(&mut self, region: RpmbRegion, key: &[u8]) -> Result<()> {
-        exts::auth_rpmb(self, region, key).await
+    fn auth_rpmb(&mut self, region: RpmbRegion, key: &[u8]) -> Result<()> {
+        exts::auth_rpmb(self, region, key)
     }
 
     #[cfg(not(feature = "no_exploits"))]

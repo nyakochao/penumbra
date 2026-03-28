@@ -2,10 +2,9 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2026 Shomy
 */
-use std::io::Cursor;
+use std::io::{Cursor, Read, Write};
 
 use log::{debug, info};
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::core::storage::{RPMB_FRAME_DATA_SZ, RpmbRegion};
 use crate::da::DownloadProtocol;
@@ -48,7 +47,7 @@ impl DACtx {
     }
 }
 
-pub async fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
+pub fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
     debug!("Trying booting XFlash extensions...");
 
     let ext_data = match prepare_extensions(xflash) {
@@ -63,7 +62,7 @@ pub async fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
     let ext_size = ext_data.len() as u32;
 
     info!("Uploading DA extensions to 0x{:08X} (0x{:X} bytes)", ext_addr, ext_size);
-    match xflash.boot_to(ext_addr, &ext_data).await {
+    match xflash.boot_to(ext_addr, &ext_data) {
         Ok(_) => {}
         // If DA extensions fail to upload, we just return false, not a fatal error
         Err(_) => {
@@ -73,7 +72,7 @@ pub async fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
     }
     info!("DA extensions uploaded");
 
-    let ack = xflash.devctrl(Cmd::ExtAck, None).await?;
+    let ack = xflash.devctrl(Cmd::ExtAck, None)?;
     if ack.len() < 4 || le_u32!(ack, 0) != 0 {
         info!("DA extensions ACK failed, continuing without extensions");
         return Ok(false);
@@ -83,7 +82,7 @@ pub async fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
     let tzcc_base = xflash.chip().tzcc_base();
     let da2_base = xflash.da.get_da2().map(|da2| da2.addr).unwrap_or(0);
     let da2_size = xflash.da.get_da2().map(|da2| da2.data.len() as u32).unwrap_or(0);
-    let storage_type = xflash.get_storage_type().await as u32;
+    let storage_type = xflash.get_storage_type() as u32;
     let read_pkt_len = xflash.read_packet_length.unwrap_or(0x100) as u32;
     let write_pkt_len = xflash.write_packet_length.unwrap_or(0x100) as u32;
     let usb_log = xflash.usb_log_channel as u32;
@@ -99,7 +98,7 @@ pub async fn boot_extensions(xflash: &mut XFlash) -> Result<bool> {
         usb_log,
     };
 
-    xflash.devctrl(Cmd::ExtSetupDaCtx, Some(&[&ctx.to_bytes()])).await?;
+    xflash.devctrl(Cmd::ExtSetupDaCtx, Some(&[&ctx.to_bytes()]))?;
 
     Ok(true)
 }
@@ -155,29 +154,29 @@ fn prepare_extensions(xflash: &XFlash) -> Option<Vec<u8>> {
     Some(da_ext_data)
 }
 
-pub async fn read32_ext(xflash: &mut XFlash, addr: u32) -> Result<u32> {
-    xflash.devctrl(Cmd::ExtReadRegister, Some(&[&addr.to_le_bytes()])).await?;
+pub fn read32_ext(xflash: &mut XFlash, addr: u32) -> Result<u32> {
+    xflash.devctrl(Cmd::ExtReadRegister, Some(&[&addr.to_le_bytes()]))?;
 
-    let payload = xflash.read_data().await?;
+    let payload = xflash.read_data()?;
     status_ok!(xflash);
 
     Ok(le_u32!(payload, 0))
 }
 
-pub async fn write32_ext(xflash: &mut XFlash, addr: u32, value: u32) -> Result<()> {
+pub fn write32_ext(xflash: &mut XFlash, addr: u32, value: u32) -> Result<()> {
     let addr_bytes = addr.to_le_bytes();
     let value_bytes = value.to_le_bytes();
 
-    xflash.devctrl(Cmd::ExtWriteRegister, Some(&[&addr_bytes, &value_bytes])).await?;
+    xflash.devctrl(Cmd::ExtWriteRegister, Some(&[&addr_bytes, &value_bytes]))?;
 
     Ok(())
 }
 
-pub async fn peek<F>(
+pub fn peek<F>(
     xflash: &mut XFlash,
     addr: u32,
     length: usize,
-    writer: &mut (dyn AsyncWrite + Unpin + Send),
+    writer: &mut (dyn Write + Send),
     mut progress: F,
 ) -> Result<()>
 where
@@ -187,19 +186,19 @@ where
     range[0..8].copy_from_slice(&(addr as u64).to_le_bytes());
     range[8..16].copy_from_slice(&(length as u64).to_le_bytes());
 
-    xflash.devctrl(Cmd::ExtReadMem, Some(&[&range])).await?;
-    xflash.upload_data(length, writer, &mut progress).await?;
+    xflash.devctrl(Cmd::ExtReadMem, Some(&[&range]))?;
+    xflash.upload_data(length, writer, &mut progress)?;
 
     status_ok!(xflash);
 
     Ok(())
 }
 
-pub async fn poke<F>(
+pub fn poke<F>(
     xflash: &mut XFlash,
     addr: u32,
     length: usize,
-    reader: &mut (dyn AsyncRead + Unpin + Send),
+    reader: &mut (dyn Read + Send),
     mut progress: F,
 ) -> Result<()>
 where
@@ -209,15 +208,15 @@ where
     range[0..8].copy_from_slice(&(addr as u64).to_le_bytes());
     range[8..16].copy_from_slice(&(length as u64).to_le_bytes());
 
-    xflash.devctrl(Cmd::ExtWriteMem, Some(&[&range])).await?;
-    xflash.download_data(length, reader, &mut progress).await?;
+    xflash.devctrl(Cmd::ExtWriteMem, Some(&[&range]))?;
+    xflash.download_data(length, reader, &mut progress)?;
 
     status_ok!(xflash);
 
     Ok(())
 }
 
-pub async fn sej(
+pub fn sej(
     xflash: &mut XFlash,
     data: &[u8],
     encrypt: bool,
@@ -233,47 +232,47 @@ pub async fn sej(
     params[3] = if xor { 1 } else { 0 };
     params[4..8].copy_from_slice(&(data.len() as u32).to_le_bytes());
 
-    xflash.devctrl(Cmd::ExtSej, Some(&[&params])).await?;
+    xflash.devctrl(Cmd::ExtSej, Some(&[&params]))?;
 
     let mut reader = Cursor::new(data);
     let mut payload = vec![0u8; data.len()];
     let mut writer = Cursor::new(&mut payload);
 
-    xflash.download_data(data.len(), &mut reader, &mut |_, _| {}).await?;
-    xflash.upload_data(data.len(), &mut writer, &mut |_, _| {}).await?;
+    xflash.download_data(data.len(), &mut reader, &mut |_, _| {})?;
+    xflash.upload_data(data.len(), &mut writer, &mut |_, _| {})?;
 
     status_ok!(xflash);
 
     Ok(payload)
 }
 
-async fn init_rpmb(xflash: &mut XFlash, region: RpmbRegion) -> Result<()> {
+fn init_rpmb(xflash: &mut XFlash, region: RpmbRegion) -> Result<()> {
     // Derive RPMB key (0 = RPMB)
-    xflash.devctrl(Cmd::ExtKeyDerive, Some(&[&0u32.to_le_bytes()])).await?;
-    let rpmb_key = xflash.read_data().await?;
+    xflash.devctrl(Cmd::ExtKeyDerive, Some(&[&0u32.to_le_bytes()]))?;
+    let rpmb_key = xflash.read_data()?;
     status_ok!(xflash);
 
     // If the RPMB is already initialized (even with another key), this will succeed
     // without actually changing the key.
-    auth_rpmb(xflash, region, &rpmb_key).await?;
+    auth_rpmb(xflash, region, &rpmb_key)?;
 
     Ok(())
 }
 
-pub async fn read_rpmb<F>(
+pub fn read_rpmb<F>(
     xflash: &mut XFlash,
     region: RpmbRegion,
     start_sector: u32,
     sectors_count: u32,
-    writer: &mut (dyn AsyncWrite + Unpin + Send),
+    writer: &mut (dyn Write + Send),
     mut progress: F,
 ) -> Result<()>
 where
     F: FnMut(usize, usize) + Send,
 {
-    init_rpmb(xflash, region).await?;
+    init_rpmb(xflash, region)?;
 
-    let storage = match xflash.get_storage().await {
+    let storage = match xflash.get_storage() {
         Some(s) => s,
         None => {
             return Err(Error::penumbra("Failed to get storage information for RPMB read"));
@@ -293,27 +292,27 @@ where
     let region = (region as u32).to_le_bytes();
     let data_len = sectors_count as usize * RPMB_FRAME_DATA_SZ;
 
-    xflash.devctrl(Cmd::ExtRpmbRead, Some(&[&region, &sector_range])).await?;
-    xflash.upload_data(data_len, writer, &mut progress).await?;
+    xflash.devctrl(Cmd::ExtRpmbRead, Some(&[&region, &sector_range]))?;
+    xflash.upload_data(data_len, writer, &mut progress)?;
     status_ok!(xflash);
 
     Ok(())
 }
 
-pub async fn write_rpmb<F>(
+pub fn write_rpmb<F>(
     xflash: &mut XFlash,
     region: RpmbRegion,
     start_sector: u32,
     sectors_count: u32,
-    reader: &mut (dyn AsyncRead + Unpin + Send),
+    reader: &mut (dyn Read + Send),
     mut progress: F,
 ) -> Result<()>
 where
     F: FnMut(usize, usize) + Send,
 {
-    init_rpmb(xflash, region).await?;
+    init_rpmb(xflash, region)?;
 
-    let storage = match xflash.get_storage().await {
+    let storage = match xflash.get_storage() {
         Some(s) => s,
         None => {
             return Err(Error::penumbra("Failed to get storage information for RPMB write"));
@@ -333,15 +332,15 @@ where
     let region = (region as u32).to_le_bytes();
     let data_len = sectors_count as usize * RPMB_FRAME_DATA_SZ;
 
-    xflash.devctrl(Cmd::ExtRpmbWrite, Some(&[&region, &sector_range])).await?;
-    xflash.download_data_with(data_len, RPMB_WRITE_PKT_LEN, reader, &mut progress).await?;
+    xflash.devctrl(Cmd::ExtRpmbWrite, Some(&[&region, &sector_range]))?;
+    xflash.download_data_with(data_len, RPMB_WRITE_PKT_LEN, reader, &mut progress)?;
     status_ok!(xflash);
 
     Ok(())
 }
 
-pub async fn auth_rpmb(xflash: &mut XFlash, region: RpmbRegion, key: &[u8]) -> Result<()> {
-    xflash.devctrl(Cmd::ExtRpmbInit, Some(&[&(region as u32).to_le_bytes(), key])).await?;
+pub fn auth_rpmb(xflash: &mut XFlash, region: RpmbRegion, key: &[u8]) -> Result<()> {
+    xflash.devctrl(Cmd::ExtRpmbInit, Some(&[&(region as u32).to_le_bytes(), key]))?;
     status_ok!(xflash);
 
     Ok(())

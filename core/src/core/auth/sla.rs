@@ -4,8 +4,6 @@
 */
 use std::sync::{Arc, OnceLock, RwLock};
 
-use async_trait::async_trait;
-
 #[cfg(not(feature = "no_localslakeyring"))]
 use crate::core::auth::local_keyring::LocalKeyring;
 use crate::error::{Error, Result};
@@ -29,16 +27,15 @@ pub struct SignRequest {
     pub pubk_mod: Vec<u8>,
 }
 
-#[async_trait]
 pub trait Signer: Send + Sync {
     /// Whether the signer can handle a a sign request,
     /// for example, if it matches the public key
     fn can_handle(&self, pubk_mod: &[u8]) -> bool;
     /// Whether the signer authorizes a sign request to be signed
     /// at all. For example, if a device is banned or restricted.
-    async fn is_authorized(&self, req: &SignRequest) -> bool;
+    fn is_authorized(&self, req: &SignRequest) -> bool;
     /// Signs the SLA challenge and returns the signed data
-    async fn sign(&self, req: &SignRequest) -> Result<Vec<u8>>;
+    fn sign(&self, req: &SignRequest) -> Result<Vec<u8>>;
 }
 
 pub struct AuthManager {
@@ -66,7 +63,7 @@ impl AuthManager {
 
     /// Registers a new signer to be available for signing requests.
     pub fn register_signer(&self, signer: Arc<dyn Signer>) -> Result<()> {
-        let mut signers = self.signers.write()?;
+        let mut signers = self.signers.write().unwrap();
         signers.push(signer);
 
         Ok(())
@@ -89,15 +86,15 @@ impl AuthManager {
     }
 
     /// Signs the given request using the first capable signer.
-    pub async fn sign(&self, req: &SignRequest) -> Result<Vec<u8>> {
+    pub fn sign(&self, req: &SignRequest) -> Result<Vec<u8>> {
         let signers = {
-            let list = self.signers.read()?;
+            let list = self.signers.read().unwrap();
             list.clone()
         };
 
         for signer in signers {
-            if signer.can_handle(&req.pubk_mod) && signer.is_authorized(req).await {
-                return signer.sign(req).await;
+            if signer.can_handle(&req.pubk_mod) && signer.is_authorized(req) {
+                return signer.sign(req);
             }
         }
 

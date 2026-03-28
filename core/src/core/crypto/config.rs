@@ -14,8 +14,8 @@
 */
 #[async_trait::async_trait]
 pub trait CryptoIO: Send {
-    async fn read32(&mut self, addr: u32) -> u32;
-    async fn write32(&mut self, addr: u32, val: u32);
+    fn read32(&mut self, addr: u32) -> u32;
+    fn write32(&mut self, addr: u32, val: u32);
 }
 
 pub struct CryptoConfig<'a> {
@@ -28,11 +28,11 @@ impl<'a> CryptoConfig<'a> {
         Self { sej_base, io }
     }
 
-    pub async fn read32(&mut self, addr: u32) -> u32 {
-        self.io.read32(addr).await
+    pub fn read32(&mut self, addr: u32) -> u32 {
+        self.io.read32(addr)
     }
 
-    pub async fn write32(&mut self, addr: u32, val: u32) {
-        self.io.write32(addr, val).await
+    pub fn write32(&mut self, addr: u32, val: u32) {
+        self.io.write32(addr, val)
     }
 }

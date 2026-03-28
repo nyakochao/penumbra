@@ -8,9 +8,9 @@ use crate::core::seccfg::{SecCfgV4, SecCfgV4Algo};
 use crate::da::xflash::exts::sej;
 use crate::da::{DownloadProtocol, XFlash};
 
-pub async fn parse_seccfg(xflash: &mut XFlash) -> Option<SecCfgV4> {
-    let seccfg = xflash.dev_info.get_partition("seccfg").await?;
-    let section = xflash.get_storage().await?.get_user_part();
+pub fn parse_seccfg(xflash: &mut XFlash) -> Option<SecCfgV4> {
+    let seccfg = xflash.dev_info.get_partition("seccfg")?;
+    let section = xflash.get_storage()?.get_user_part();
 
     let mut progress = |_, _| {};
 
@@ -18,16 +18,16 @@ pub async fn parse_seccfg(xflash: &mut XFlash) -> Option<SecCfgV4> {
     let mut seccfg_header = Vec::with_capacity(200);
     let mut cursor = Cursor::new(&mut seccfg_header);
 
-    xflash.read_flash(seccfg.address, 200, section, &mut progress, &mut cursor).await.ok()?;
+    xflash.read_flash(seccfg.address, 200, section, &mut progress, &mut cursor).ok()?;
 
     let mut parsed_seccfg = SecCfgV4::parse_header(&seccfg_header).ok()?;
     let hash = parsed_seccfg.get_encrypted_hash();
     for algo in [SecCfgV4Algo::SW, SecCfgV4Algo::HWv3, SecCfgV4Algo::HWv4, SecCfgV4Algo::HW] {
         let dec_hash = match algo {
-            SecCfgV4Algo::SW => sej(xflash, &hash, false, false, false, false).await.ok()?,
-            SecCfgV4Algo::HWv3 => sej(xflash, &hash, false, true, true, false).await.ok()?,
-            SecCfgV4Algo::HWv4 => sej(xflash, &hash, false, false, true, false).await.ok()?,
-            SecCfgV4Algo::HW => sej(xflash, &hash, false, false, true, true).await.ok()?,
+            SecCfgV4Algo::SW => sej(xflash, &hash, false, false, false, false).ok()?,
+            SecCfgV4Algo::HWv3 => sej(xflash, &hash, false, true, true, false).ok()?,
+            SecCfgV4Algo::HWv4 => sej(xflash, &hash, false, false, true, false).ok()?,
+            SecCfgV4Algo::HW => sej(xflash, &hash, false, false, true, true).ok()?,
         };
         if dec_hash == parsed_seccfg.get_hash() {
             parsed_seccfg.set_algo(algo);
@@ -38,22 +38,20 @@ pub async fn parse_seccfg(xflash: &mut XFlash) -> Option<SecCfgV4> {
     None
 }
 
-pub async fn write_seccfg(xflash: &mut XFlash, seccfg: &mut SecCfgV4) -> Option<Vec<u8>> {
-    let seccfg_part = xflash.dev_info.get_partition("seccfg").await?;
-    let section = xflash.get_storage().await?.get_user_part();
+pub fn write_seccfg(xflash: &mut XFlash, seccfg: &mut SecCfgV4) -> Option<Vec<u8>> {
+    let seccfg_part = xflash.dev_info.get_partition("seccfg")?;
+    let section = xflash.get_storage()?.get_user_part();
 
     let enc_hash = match seccfg.get_algo() {
         Some(SecCfgV4Algo::SW) => {
-            sej(xflash, &seccfg.get_hash(), true, false, false, false).await.ok()?
+            sej(xflash, &seccfg.get_hash(), true, false, false, false).ok()?
         }
-        Some(SecCfgV4Algo::HW) => {
-            sej(xflash, &seccfg.get_hash(), true, false, true, true).await.ok()?
-        }
+        Some(SecCfgV4Algo::HW) => sej(xflash, &seccfg.get_hash(), true, false, true, true).ok()?,
         Some(SecCfgV4Algo::HWv3) => {
-            sej(xflash, &seccfg.get_hash(), true, true, true, false).await.ok()?
+            sej(xflash, &seccfg.get_hash(), true, true, true, false).ok()?
         }
         Some(SecCfgV4Algo::HWv4) => {
-            sej(xflash, &seccfg.get_hash(), true, false, true, false).await.ok()?
+            sej(xflash, &seccfg.get_hash(), true, false, true, false).ok()?
         }
         _ => return None,
     };
@@ -66,7 +64,6 @@ pub async fn write_seccfg(xflash: &mut XFlash, seccfg: &mut SecCfgV4) -> Option<
 
     xflash
         .write_flash(seccfg_part.address, seccfg_data.len(), &mut cursor, section, &mut progress)
-        .await
         .ok()?;
 
     Some(seccfg_data)

@@ -13,12 +13,12 @@ use crate::da::xml::Xml;
 use crate::da::xml::cmds::{GetHwInfo, XmlCmdLifetime};
 use crate::utilities::xml::get_tag;
 
-pub async fn detect_storage(xml: &mut Xml) -> Option<Arc<dyn Storage>> {
+pub fn detect_storage(xml: &mut Xml) -> Option<Arc<dyn Storage>> {
     xmlcmd!(xml, GetHwInfo, "0").ok();
 
-    let reponse = xml.get_upload_file_resp().await.ok()?;
+    let reponse = xml.get_upload_file_resp().ok()?;
 
-    xml.lifetime_ack(XmlCmdLifetime::CmdEnd).await.ok()?;
+    xml.lifetime_ack(XmlCmdLifetime::CmdEnd).ok()?;
     let storage_str: String = get_tag(&reponse, "storage").ok()?;
 
     match storage_str.as_str() {

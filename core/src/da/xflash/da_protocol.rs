@@ -2,12 +2,10 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
-use std::io::Cursor;
+use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
 
 use log::{debug, error, info};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::time::{Duration, timeout};
 
 use crate::connection::Connection;
 use crate::connection::port::ConnectionType;
@@ -37,17 +35,15 @@ use crate::error::{Error, Result, XFlashError};
 use crate::exploit::{Carbonara, Exploit, Kamakiri};
 use crate::{exploit, le_u32};
 
-#[async_trait::async_trait]
 impl DownloadProtocol for XFlash {
-    async fn upload_da(&mut self) -> Result<bool> {
+    fn upload_da(&mut self) -> Result<bool> {
         exploit!(Kamakiri, self);
 
         let da1 = self.da.get_da1().ok_or_else(|| Error::penumbra("DA1 region not found"))?;
         self.upload_stage1(da1.addr, da1.length, da1.data.clone(), da1.sig_len)
-            .await
             .map_err(|e| Error::proto(format!("Failed to upload DA1: {}", e)))?;
 
-        flash::get_packet_length(self).await?;
+        flash::get_packet_length(self)?;
 
         exploit!(Carbonara, self);
 
@@ -61,27 +57,27 @@ impl DownloadProtocol for XFlash {
             da2data.len()
         );
 
-        match self.boot_to(da2.addr, &da2data).await {
+        match self.boot_to(da2.addr, &da2data) {
             Ok(true) => {
                 info!("[Penumbra] Successfully uploaded and executed DA2");
-                self.handle_sla().await?;
-                flash::get_packet_length(self).await?; // Re-query packet length for DA loop, for faster speeds :)
+                self.handle_sla()?;
+                flash::get_packet_length(self)?; // Re-query packet length for DA loop, for faster speeds :)
 
                 #[cfg(not(feature = "no_exploits"))]
-                self.boot_extensions().await?;
+                self.boot_extensions()?;
 
                 Ok(true)
             }
             Ok(false) => Err(Error::proto("Failed to execute DA2")),
             Err(e) => {
-                self.reboot(BootMode::Normal).await.ok();
+                self.reboot(BootMode::Normal).ok();
                 Err(Error::proto(format!("Error uploading DA2: {}", e)))
             }
         }
     }
 
-    async fn boot_to(&mut self, addr: u32, data: &[u8]) -> Result<bool> {
-        self.send_cmd(Cmd::BootTo).await?;
+    fn boot_to(&mut self, addr: u32, data: &[u8]) -> Result<bool> {
+        self.send_cmd(Cmd::BootTo)?;
 
         // Addr (LE) | Length (LE)
         // 00000040000000002c83050000000000 -> addr=0x4000000, len=0x0005832c
@@ -89,20 +85,20 @@ impl DownloadProtocol for XFlash {
         param[0..8].copy_from_slice(&(addr as u64).to_le_bytes());
         param[8..16].copy_from_slice(&(data.len() as u64).to_le_bytes());
 
-        self.send_data(&[&param, data]).await?;
+        self.send_data(&[&param, data])?;
 
         status_any!(self, 0, Cmd::SyncSignal as u32);
 
         Ok(true)
     }
 
-    async fn send_data(&mut self, data: &[&[u8]]) -> Result<bool> {
+    fn send_data(&mut self, data: &[&[u8]]) -> Result<bool> {
         let mut hdr: [u8; 12];
 
         for param in data {
             hdr = self.generate_header(param);
 
-            self.conn.write(&hdr).await?;
+            self.conn.write(&hdr)?;
 
             let mut pos = 0;
             let max_chunk_size = self.write_packet_length.unwrap_or(0x8000);
@@ -111,7 +107,7 @@ impl DownloadProtocol for XFlash {
                 let end = param.len().min(pos + max_chunk_size);
                 let chunk = &param[pos..end];
                 debug!("[TX] Sending chunk (0x{:X} bytes)", chunk.len());
-                self.conn.write(chunk).await?;
+                self.conn.write(chunk)?;
                 pos = end;
             }
 
@@ -123,14 +119,8 @@ impl DownloadProtocol for XFlash {
         Ok(true)
     }
 
-    async fn get_status(&mut self) -> Result<u32> {
-        let data = match timeout(Duration::from_millis(3000), self.read_data()).await {
-            Ok(result) => result?,
-            Err(_) => {
-                debug!("Status timeout");
-                return Err(Error::io("Status read timed out"));
-            }
-        };
+    fn get_status(&mut self) -> Result<u32> {
+        let data = self.read_data()?;
 
         if data.is_empty() {
             debug!("[RX] Status: empty data");
@@ -147,12 +137,12 @@ impl DownloadProtocol for XFlash {
         }
     }
 
-    async fn send(&mut self, data: &[u8]) -> Result<bool> {
-        self.send_data(&[data]).await
+    fn send(&mut self, data: &[u8]) -> Result<bool> {
+        self.send_data(&[data])
     }
 
-    async fn shutdown(&mut self) -> Result<()> {
-        self.send_cmd(Cmd::Shutdown).await?;
+    fn shutdown(&mut self) -> Result<()> {
+        self.send_cmd(Cmd::Shutdown)?;
 
         let params: [u32; 7] = [
             0, // is_dev_reboot (0 = shutdown)
@@ -171,14 +161,14 @@ impl DownloadProtocol for XFlash {
 
         info!("Shutting down device...");
 
-        self.send(&buf).await?;
+        self.send(&buf)?;
 
-        self.conn.port.close().await.ok();
+        self.conn.port.close().ok();
         Ok(())
     }
 
-    async fn reboot(&mut self, bootmode: BootMode) -> Result<()> {
-        self.send_cmd(Cmd::Shutdown).await?;
+    fn reboot(&mut self, bootmode: BootMode) -> Result<()> {
+        self.send_cmd(Cmd::Shutdown)?;
 
         let bootup = match bootmode {
             BootMode::Normal => 0,
@@ -204,73 +194,73 @@ impl DownloadProtocol for XFlash {
 
         info!("Rebooting device into {:?} mode...", bootmode);
 
-        self.send(&buf).await?;
+        self.send(&buf)?;
 
-        self.conn.port.close().await.ok();
+        self.conn.port.close().ok();
         Ok(())
     }
 
-    async fn read_flash(
+    fn read_flash(
         &mut self,
         addr: u64,
         size: usize,
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn Write + Send),
     ) -> Result<()> {
-        flash::read_flash(self, addr, size, section, progress, writer).await
+        flash::read_flash(self, addr, size, section, progress, writer)
     }
 
-    async fn write_flash(
+    fn write_flash(
         &mut self,
         addr: u64,
         size: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::write_flash(self, addr, size, reader, section, progress).await
+        flash::write_flash(self, addr, size, reader, section, progress)
     }
 
-    async fn erase_flash(
+    fn erase_flash(
         &mut self,
         addr: u64,
         size: usize,
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::erase_flash(self, addr, size, section, progress).await
+        flash::erase_flash(self, addr, size, section, progress)
     }
 
-    async fn download(
+    fn download(
         &mut self,
         part_name: String,
         size: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::download(self, part_name, size, reader, progress).await
+        flash::download(self, part_name, size, reader, progress)
     }
 
-    async fn upload(
+    fn upload(
         &mut self,
         part_name: String,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::upload(self, part_name, writer, progress).await
+        flash::upload(self, part_name, writer, progress)
     }
 
-    async fn format(
+    fn format(
         &mut self,
         part_name: String,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        flash::format(self, part_name, progress).await
+        flash::format(self, part_name, progress)
     }
 
-    async fn get_usb_speed(&mut self) -> Result<u32> {
-        let usb_speed = self.devctrl(Cmd::GetUsbSpeed, None).await?;
+    fn get_usb_speed(&mut self) -> Result<u32> {
+        let usb_speed = self.devctrl(Cmd::GetUsbSpeed, None)?;
         debug!("USB Speed Data: {:?}", usb_speed);
         Ok(le_u32!(usb_speed, 0))
     }
@@ -284,14 +274,14 @@ impl DownloadProtocol for XFlash {
         Ok(())
     }
 
-    async fn read32(&mut self, addr: u32) -> Result<u32> {
+    fn read32(&mut self, addr: u32) -> Result<u32> {
         #[cfg(not(feature = "no_exploits"))]
         if self.using_exts {
-            return read32_ext(self, addr).await;
+            return read32_ext(self, addr);
         }
         debug!("Reading 32-bit register at address 0x{:08X}", addr);
         let param = addr.to_le_bytes();
-        let resp = self.devctrl(Cmd::DeviceCtrlReadRegister, Some(&[&param])).await?;
+        let resp = self.devctrl(Cmd::DeviceCtrlReadRegister, Some(&[&param]))?;
         debug!("[RX] Read Register Response: {:02X?}", resp);
         if resp.len() < 4 {
             debug!("Short read: expected 4 bytes, got {}", resp.len());
@@ -300,29 +290,29 @@ impl DownloadProtocol for XFlash {
         Ok(le_u32!(resp, 0))
     }
 
-    async fn write32(&mut self, addr: u32, value: u32) -> Result<()> {
+    fn write32(&mut self, addr: u32, value: u32) -> Result<()> {
         #[cfg(not(feature = "no_exploits"))]
         if self.using_exts {
-            return write32_ext(self, addr, value).await;
+            return write32_ext(self, addr, value);
         }
         let mut param = [0u8; 8];
         param[0..4].copy_from_slice(&addr.to_le_bytes());
         param[4..8].copy_from_slice(&value.to_le_bytes());
         debug!("[TX] Writing 32-bit value 0x{:08X} to address 0x{:08X}", value, addr);
-        self.devctrl(Cmd::SetRegisterValue, Some(&[&param])).await?;
+        self.devctrl(Cmd::SetRegisterValue, Some(&[&param]))?;
         Ok(())
     }
 
-    async fn get_storage_type(&mut self) -> StorageType {
-        self.get_or_detect_storage().await.map_or(StorageType::Unknown, |s| s.kind())
+    fn get_storage_type(&mut self) -> StorageType {
+        self.get_or_detect_storage().map_or(StorageType::Unknown, |s| s.kind())
     }
 
-    async fn get_storage(&mut self) -> Option<Arc<dyn Storage>> {
-        self.get_or_detect_storage().await
+    fn get_storage(&mut self) -> Option<Arc<dyn Storage>> {
+        self.get_or_detect_storage()
     }
 
-    async fn get_partitions(&mut self) -> Vec<Partition> {
-        let storage = match self.get_storage().await {
+    fn get_partitions(&mut self) -> Vec<Partition> {
+        let storage = match self.get_storage() {
             Some(s) => s,
             None => {
                 error!("[Penumbra] Failed to get storage for partition parsing");
@@ -351,8 +341,8 @@ impl DownloadProtocol for XFlash {
 
         let mut pgpt_data = Vec::new();
         let mut pgpt_cursor = Cursor::new(&mut pgpt_data);
-        self.upload("PGPT".into(), &mut pgpt_cursor, &mut progress).await.ok();
-        self.send(&[0u8; 4]).await.ok();
+        self.upload("PGPT".into(), &mut pgpt_cursor, &mut progress).ok();
+        self.send(&[0u8; 4]).ok();
         let parsed_gpt_parts =
             Gpt::parse(&pgpt_data, storage_type).map(|g| g.partitions()).unwrap_or_default();
 
@@ -361,8 +351,8 @@ impl DownloadProtocol for XFlash {
         } else {
             let mut sgpt_data = Vec::new();
             let mut sgpt_cursor = Cursor::new(&mut sgpt_data);
-            self.upload("SGPT".into(), &mut sgpt_cursor, &mut progress).await.ok();
-            self.send(&[0u8; 4]).await.ok();
+            self.upload("SGPT".into(), &mut sgpt_cursor, &mut progress).ok();
+            self.send(&[0u8; 4]).ok();
             Gpt::parse(&sgpt_data, storage_type).map(|g| g.partitions()).unwrap_or_default()
         };
 
@@ -373,8 +363,8 @@ impl DownloadProtocol for XFlash {
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>> {
-        let seccfg = parse_seccfg(self).await;
+    fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>> {
+        let seccfg = parse_seccfg(self);
         if seccfg.is_none() {
             error!("[Penumbra] Failed to parse seccfg, cannot set lock state");
             return None;
@@ -382,58 +372,58 @@ impl DownloadProtocol for XFlash {
 
         let mut seccfg = seccfg.unwrap();
         seccfg.set_lock_state(locked);
-        write_seccfg(self, &mut seccfg).await
+        write_seccfg(self, &mut seccfg)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn peek(
+    fn peek(
         &mut self,
         addr: u32,
         length: usize,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        peek(self, addr, length, writer, progress).await
+        peek(self, addr, length, writer, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn poke(
+    fn poke(
         &mut self,
         addr: u32,
         length: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        poke(self, addr, length, reader, progress).await
+        poke(self, addr, length, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn read_rpmb(
+    fn read_rpmb(
         &mut self,
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        read_rpmb(self, region, start_sector, sectors_count, writer, progress).await
+        read_rpmb(self, region, start_sector, sectors_count, writer, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn write_rpmb(
+    fn write_rpmb(
         &mut self,
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        write_rpmb(self, region, start_sector, sectors_count, reader, progress).await
+        write_rpmb(self, region, start_sector, sectors_count, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    async fn auth_rpmb(&mut self, region: RpmbRegion, key: &[u8]) -> Result<()> {
-        auth_rpmb(self, region, key).await
+    fn auth_rpmb(&mut self, region: RpmbRegion, key: &[u8]) -> Result<()> {
+        auth_rpmb(self, region, key)
     }
 
     #[cfg(not(feature = "no_exploits"))]

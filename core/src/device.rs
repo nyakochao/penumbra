@@ -2,11 +2,8 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
-use std::time::Duration;
 
 use log::{error, info, warn};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::time::timeout;
 
 use crate::connection::Connection;
 use crate::connection::port::{ConnectionType, MTKPort};
@@ -170,23 +167,23 @@ impl Device {
     /// device.init().await?;
     /// assert_eq!(device.connected, true);
     /// ```
-    pub async fn init(&mut self) -> Result<()> {
+    pub fn init(&mut self) -> Result<()> {
         let mut conn = self
             .connection
             .take()
             .ok_or_else(|| Error::penumbra("Connection is not initialized."))?;
 
-        conn.handshake().await?;
+        conn.handshake()?;
 
-        let soc_id = conn.get_soc_id().await?;
-        let meid = conn.get_meid().await?;
-        let hw_code = conn.get_hw_code().await?;
-        let target_config = conn.get_target_config().await?;
+        let soc_id = conn.get_soc_id()?;
+        let meid = conn.get_meid()?;
+        let hw_code = conn.get_hw_code()?;
+        let target_config = conn.get_target_config()?;
 
         let device_info =
             DevInfoData { soc_id, meid, hw_code, storage: None, partitions: vec![], target_config };
 
-        self.dev_info.set_data(device_info).await;
+        self.dev_info.set_data(device_info);
         let chip = chip_from_hw_code(hw_code);
         if chip.hw_code() == 0x0000 {
             warn!("Unknown hardware code 0x{:04X}. Device might not work as expected.", hw_code);
@@ -196,7 +193,7 @@ impl Device {
         self.dev_info.set_chip(chip);
 
         if self.da_data.is_some() {
-            self.protocol = Some(self.init_da_protocol(conn).await?);
+            self.protocol = Some(self.init_da_protocol(conn)?);
         } else {
             self.connection = Some(conn);
         }
@@ -208,30 +205,22 @@ impl Device {
 
     /// Reinits the device connection based on the current connection type and optional DA info.
     /// This is useful for CLIs or scenarios where the Device instance needs to be reset.
-    pub async fn reinit(&mut self, dev_info: DevInfoData) -> Result<()> {
+    pub fn reinit(&mut self, dev_info: DevInfoData) -> Result<()> {
         let mut conn = self
             .connection
             .take()
             .ok_or_else(|| Error::penumbra("Connection is not initialized."))?;
 
-        self.dev_info.set_data(dev_info).await;
-        self.dev_info.set_chip(chip_from_hw_code(self.dev_info.hw_code().await));
+        self.dev_info.set_data(dev_info);
+        self.dev_info.set_chip(chip_from_hw_code(self.dev_info.hw_code()));
 
         match conn.connection_type {
             ConnectionType::Preloader | ConnectionType::Brom => {
-                // If we already are in preloader/brom mode, we either handshake again or timeout
-                let handshake_result = timeout(Duration::from_secs(3), conn.handshake()).await;
-                match handshake_result {
-                    Ok(result) => result?,
-                    Err(_) => {
-                        return Err(Error::conn(
-                            "Handshake timed out. Reset the device and try again.",
-                        ));
-                    }
-                }
+                // If we already are in preloader/brom mode, just handshake again
+                conn.handshake()?;
             }
             ConnectionType::Da => {
-                self.protocol = Some(self.init_da_protocol(conn).await?);
+                self.protocol = Some(self.init_da_protocol(conn)?);
             }
         };
 
@@ -257,7 +246,7 @@ impl Device {
     /// device.enter_da_mode().await?;
     /// assert_eq!(device.get_connection()?.connection_type, ConnectionType::Da);
     /// ```
-    pub async fn enter_da_mode(&mut self) -> Result<()> {
+    pub fn enter_da_mode(&mut self) -> Result<()> {
         if !self.connected {
             return Err(Error::conn("Device is not connected. Call init() first."));
         }
@@ -267,23 +256,23 @@ impl Device {
         if self.protocol.is_none() {
             let conn =
                 self.connection.take().ok_or_else(|| Error::conn("No connection available."))?;
-            let protocol = self.init_da_protocol(conn).await?;
+            let protocol = self.init_da_protocol(conn)?;
             self.protocol = Some(protocol);
         }
 
         let protocol = self.protocol.as_mut().unwrap();
         if conn_type != ConnectionType::Da {
-            protocol.upload_da().await?;
+            protocol.upload_da()?;
             self.set_connection_type(ConnectionType::Da)?;
         }
 
         // Fallback to ensure we always have the partitions available.
-        self.get_partitions().await;
+        self.get_partitions();
         Ok(())
     }
 
     /// Internal helper to ensure the device enters DA mode before performing DA operations.
-    async fn ensure_da_mode(&mut self) -> Result<&mut DAProtocol> {
+    fn ensure_da_mode(&mut self) -> Result<&mut DAProtocol> {
         if !self.connected {
             return Err(Error::conn("Device is not connected. Call init() first."));
         }
@@ -294,19 +283,19 @@ impl Device {
 
         if self.get_connection()?.connection_type != ConnectionType::Da {
             info!("Not in DA mode, entering now...");
-            self.enter_da_mode().await?;
+            self.enter_da_mode()?;
         }
 
         Ok(self.get_protocol().unwrap())
     }
 
-    async fn init_da_protocol(&mut self, conn: Connection) -> Result<DAProtocol> {
+    fn init_da_protocol(&mut self, conn: Connection) -> Result<DAProtocol> {
         let da_bytes = self.da_data.clone().ok_or_else(|| {
             Error::conn("DA protocol is not initialized and no DA file was provided.")
         })?;
 
         let da_file = DAFile::parse_da(&da_bytes)?;
-        let hw_code = self.dev_info.hw_code().await;
+        let hw_code = self.dev_info.hw_code();
         let da = da_file.get_da_from_hw_code(hw_code).ok_or_else(|| {
             Error::penumbra(format!("No compatible DA for hardware code 0x{:04X}", hw_code))
         })?;
@@ -328,7 +317,7 @@ impl Device {
             _ => return Err(Error::penumbra("Unsupported DA type")),
         };
 
-        self.get_partitions().await;
+        self.get_partitions();
         Ok(protocol)
     }
 
@@ -389,8 +378,8 @@ impl Device {
     ///     println!("{}: size={}", part.name, part.size);
     /// }
     /// ```
-    pub async fn get_partitions(&mut self) -> Vec<Partition> {
-        let cached = self.dev_info.partitions().await;
+    pub fn get_partitions(&mut self) -> Vec<Partition> {
+        let cached = self.dev_info.partitions();
         if !cached.is_empty() {
             return cached;
         }
@@ -401,9 +390,9 @@ impl Device {
         };
 
         info!("Retrieving partition information...");
-        let partitions = protocol.get_partitions().await;
+        let partitions = protocol.get_partitions();
 
-        self.dev_info.set_partitions(partitions.clone()).await;
+        self.dev_info.set_partitions(partitions.clone());
 
         partitions
     }
@@ -411,43 +400,41 @@ impl Device {
     /// Reads data from a specified partition on the device.
     /// This function assumes the partition to be part of the user section.
     /// To read from other sections, use `read_offset` with appropriate address.
-    pub async fn read_partition(
+    pub fn read_partition(
         &mut self,
         name: &str,
         progress: &mut (dyn FnMut(usize, usize) + Send),
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn std::io::Write + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let part = self
             .dev_info
             .get_partition(name)
-            .await
             .ok_or_else(|| Error::penumbra(format!("Partition '{}' not found", name)))?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.read_flash(part.address, part.size, part.kind, progress, writer).await
+        protocol.read_flash(part.address, part.size, part.kind, progress, writer)
     }
 
     /// Writes data to a specified partition on the device.
     /// This function assumes the partition to be part of the user section.
     /// To write to other sections, use `write_offset` with appropriate address.
-    pub async fn write_partition(
+    pub fn write_partition(
         &mut self,
         name: &str,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn std::io::Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let part = self
             .dev_info
             .get_partition(name)
-            .await
             .ok_or_else(|| Error::penumbra(format!("Partition '{}' not found", name)))?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.write_flash(part.address, part.size, reader, part.kind, progress).await
+        protocol.write_flash(part.address, part.size, reader, part.kind, progress)
     }
 
     /// Erases a specified partition on the device.
@@ -467,21 +454,20 @@ impl Device {
     /// let mut progress = |_erased: usize, _total: usize| {};
     /// device.erase_partition("userdata", &mut progress).await?;
     /// ```
-    pub async fn erase_partition(
+    pub fn erase_partition(
         &mut self,
         partition: &str,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let part = self
             .dev_info
             .get_partition(partition)
-            .await
             .ok_or_else(|| Error::penumbra(format!("Partition '{}' not found", partition)))?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.erase_flash(part.address, part.size, part.kind, progress).await
+        protocol.erase_flash(part.address, part.size, part.kind, progress)
     }
 
     /// Reads data from a specified offset and size on the device.
@@ -504,18 +490,18 @@ impl Device {
     ///     .read_offset(0x0, 0x40000, PartitionKind::Emmc(EmmcPartition::Boot1), &mut progress)
     ///     .await?;
     /// ```
-    pub async fn read_offset(
+    pub fn read_offset(
         &mut self,
         address: u64,
         size: usize,
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn std::io::Write + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.read_flash(address, size, section, progress, writer).await
+        protocol.read_flash(address, size, section, progress, writer)
     }
 
     /// Writes data to a specified offset and size on the device.
@@ -545,18 +531,18 @@ impl Device {
     ///     )
     ///     .await?;
     /// ```
-    pub async fn write_offset(
+    pub fn write_offset(
         &mut self,
         address: u64,
         size: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn std::io::Read + Send),
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.write_flash(address, size, reader, section, progress).await
+        protocol.write_flash(address, size, reader, section, progress)
     }
 
     /// Erases data at a specified offset and size on the device.
@@ -579,17 +565,17 @@ impl Device {
     ///     .erase_offset(0x0, 0x40000, PartitionKind::Emmc(EmmcPartition::Boot1), &mut progress)
     ///     .await?;
     /// ```
-    pub async fn erase_offset(
+    pub fn erase_offset(
         &mut self,
         address: u64,
         size: usize,
         section: PartitionKind,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.erase_flash(address, size, section, progress).await
+        protocol.erase_flash(address, size, section, progress)
     }
 
     /// Like `write_partition`, but instead of writing using offsets and sizes from GPT,
@@ -611,17 +597,17 @@ impl Device {
     /// let firmware_data = std::fs::read("logo.bin").expect("Failed to read firmware");
     /// device.download("logo", &firmware_data).await?;
     /// ```
-    pub async fn download(
+    pub fn download(
         &mut self,
         partition: &str,
         size: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn std::io::Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.download(partition.to_string(), size, reader, progress).await
+        protocol.download(partition.to_string(), size, reader, progress)
     }
 
     /// Like `read_partition`, but instead of reading using offsets and sizes from GPT,
@@ -647,16 +633,16 @@ impl Device {
     /// let mut progress = |_written: usize, _total: usize| {};
     /// device.upload("logo", &mut writer, &mut progress).await?;
     /// ```
-    pub async fn upload(
+    pub fn upload(
         &mut self,
         partition: &str,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn std::io::Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.upload(partition.to_string(), writer, progress).await
+        protocol.upload(partition.to_string(), writer, progress)
     }
 
     /// Formats a specified partition on the device
@@ -674,15 +660,15 @@ impl Device {
     /// let mut progress = |_erased: usize, _total: usize| {};
     /// device.format("userdata", &mut progress).await?;
     /// ```
-    pub async fn format(
+    pub fn format(
         &mut self,
         partition: &str,
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.format(partition.to_string(), progress).await
+        protocol.format(partition.to_string(), progress)
     }
 
     /// Shuts down the device
@@ -699,11 +685,11 @@ impl Device {
     /// device.init().await?;
     /// device.shutdown().await?;
     /// ```
-    pub async fn shutdown(&mut self) -> Result<()> {
-        self.ensure_da_mode().await?;
+    pub fn shutdown(&mut self) -> Result<()> {
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.shutdown().await
+        protocol.shutdown()
     }
 
     /// Reboots the device into the specified boot mode.
@@ -721,11 +707,11 @@ impl Device {
     /// device.init().await?;
     /// device.reboot(BootMode::Normal).await?;
     /// ```
-    pub async fn reboot(&mut self, bootmode: BootMode) -> Result<()> {
-        self.ensure_da_mode().await?;
+    pub fn reboot(&mut self, bootmode: BootMode) -> Result<()> {
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.reboot(bootmode).await
+        protocol.reboot(bootmode)
     }
 
     /// Sets the lock state in `seccfg` to either lock or unlock the bootloader.
@@ -747,11 +733,11 @@ impl Device {
     /// let seccfg = device.set_seccfg_lock_state(LockFlag::Unlock).await;
     /// ```
     #[cfg(not(feature = "no_exploits"))]
-    pub async fn set_seccfg_lock_state(&mut self, lock_state: LockFlag) -> Option<Vec<u8>> {
+    pub fn set_seccfg_lock_state(&mut self, lock_state: LockFlag) -> Option<Vec<u8>> {
         // Ensure DA mode first; this will populate partitions and storage
-        self.ensure_da_mode().await.ok()?;
+        self.ensure_da_mode().ok()?;
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.set_seccfg_lock_state(lock_state).await
+        protocol.set_seccfg_lock_state(lock_state)
     }
 
     /// Reads memory from the device at the given address and size.
@@ -777,17 +763,17 @@ impl Device {
     /// device.peek(0x0010_0000, 0x1000, &mut writer, &mut progress).await?;
     /// ```
     #[cfg(not(feature = "no_exploits"))]
-    pub async fn peek(
+    pub fn peek(
         &mut self,
         addr: u32,
         size: usize,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn std::io::Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.peek(addr, size, writer, progress).await
+        protocol.peek(addr, size, writer, progress)
     }
 
     /// Writes memory to the device at the given address and size.
@@ -813,67 +799,67 @@ impl Device {
     /// device.poke(0x0010_0000, 0x1000, &mut reader, &mut progress).await?;
     /// ```
     #[cfg(not(feature = "no_exploits"))]
-    pub async fn poke(
+    pub fn poke(
         &mut self,
         addr: u32,
         size: usize,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn std::io::Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.poke(addr, size, reader, progress).await
+        protocol.poke(addr, size, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    pub async fn read_rpmb(
+    pub fn read_rpmb(
         &mut self,
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        writer: &mut (dyn AsyncWrite + Unpin + Send),
+        writer: &mut (dyn std::io::Write + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.read_rpmb(region, start_sector, sectors_count, writer, progress).await
+        protocol.read_rpmb(region, start_sector, sectors_count, writer, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    pub async fn write_rpmb(
+    pub fn write_rpmb(
         &mut self,
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        reader: &mut (dyn AsyncRead + Unpin + Send),
+        reader: &mut (dyn std::io::Read + Send),
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()> {
-        self.ensure_da_mode().await?;
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.write_rpmb(region, start_sector, sectors_count, reader, progress).await
+        protocol.write_rpmb(region, start_sector, sectors_count, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    pub async fn auth_rpmb(&mut self, region: RpmbRegion, key: &[u8]) -> Result<()> {
-        self.ensure_da_mode().await?;
+    pub fn auth_rpmb(&mut self, region: RpmbRegion, key: &[u8]) -> Result<()> {
+        self.ensure_da_mode()?;
 
         let protocol = self.protocol.as_mut().unwrap();
-        protocol.auth_rpmb(region, key).await
+        protocol.auth_rpmb(region, key)
     }
 }
 
 #[async_trait::async_trait]
 impl CryptoIO for Device {
-    async fn read32(&mut self, addr: u32) -> u32 {
+    fn read32(&mut self, addr: u32) -> u32 {
         let Some(protocol) = self.get_protocol() else {
             error!("No protocol available for read32 at 0x{:08X}!", addr);
             return 0;
         };
 
-        match protocol.read32(addr).await {
+        match protocol.read32(addr) {
             Ok(val) => val,
             Err(e) => {
                 error!("Failed to read32 from protocol at 0x{:08X}: {}", addr, e);
@@ -882,13 +868,13 @@ impl CryptoIO for Device {
         }
     }
 
-    async fn write32(&mut self, addr: u32, val: u32) {
+    fn write32(&mut self, addr: u32, val: u32) {
         let Some(protocol) = self.get_protocol() else {
             error!("No protocol available for write32 at 0x{:08X}!", addr);
             return;
         };
 
-        if let Err(e) = protocol.write32(addr, val).await {
+        if let Err(e) = protocol.write32(addr, val) {
             error!("Failed to write32 to protocol at 0x{:08X}: {}", addr, e);
         }
     }
