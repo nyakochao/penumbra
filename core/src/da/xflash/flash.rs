@@ -64,6 +64,8 @@ pub fn write_flash(
     section: PartitionKind,
     progress: &mut (dyn FnMut(usize, usize) + Send),
 ) -> Result<()> {
+    get_packet_length(xflash)?;
+
     info!("Writing flash at address {:#X} with size {:#X}", addr, size);
 
     let storage_type = xflash.get_storage_type() as u32;
@@ -137,6 +139,8 @@ pub fn download(
     xflash.send_cmd(Cmd::DeviceCtrl)?;
     xflash.send_cmd(Cmd::StartDlInfo)?;
     status_ok!(xflash);
+
+    get_packet_length(xflash)?;
 
     xflash.send_cmd(Cmd::Download)?;
     xflash.send_data(&[part_name.as_bytes(), &size.to_le_bytes()])?;
