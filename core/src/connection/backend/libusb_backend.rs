@@ -6,7 +6,7 @@
 use std::thread::sleep;
 use std::time::Duration;
 
-use log::{debug, error, info};
+use log::{debug, info};
 use rusb::{Context, Device, DeviceHandle, Direction, Recipient, RequestType, UsbContext};
 
 use crate::connection::port::{ConnectionType, KNOWN_PORTS, MTKPort};
@@ -175,20 +175,19 @@ impl MTKPort for UsbMTKPort {
             return Ok(());
         }
 
-        let port_name = self.port_name.clone();
-
         for iface in 0..=1 {
             if let Err(e) = self.handle.release_interface(iface) {
-                error!("Failed to release interface {}: {:?}", iface, e);
+                debug!("Could not release interface {}: {:?}", iface, e);
             }
-
-            if let Err(e) = self.handle.attach_kernel_driver(iface) {
-                error!("Failed to reattach kernel driver on interface {}: {:?}", iface, e);
-            }
+            // NOTE: attach_kernel_driver is intentionally skipped.
+            // On macOS/Darwin, libusb's attach_kernel_driver calls
+            // darwin_reenumerate_device which segfaults if the device
+            // has already physically disconnected (e.g. after reboot).
+            // The kernel reclaims the interface automatically on handle drop.
         }
 
         self.is_open = false;
-        info!("Closed USB MTK port: {}", port_name);
+        info!("Closed USB MTK port: {}", self.port_name);
 
         Ok(())
     }
