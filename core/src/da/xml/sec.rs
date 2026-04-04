@@ -38,7 +38,7 @@ pub fn parse_seccfg(xml: &mut Xml) -> Option<SecCfgV4> {
     None
 }
 
-pub fn write_seccfg(xml: &mut Xml, seccfg: &mut SecCfgV4) -> Option<Vec<u8>> {
+pub fn write_seccfg(xml: &mut Xml, seccfg: &mut SecCfgV4) -> Option<[u8; 512]> {
     let enc_hash = match seccfg.get_algo() {
         Some(SecCfgV4Algo::SW) => sej(xml, &seccfg.get_hash(), true, false, false, false).ok()?,
         Some(SecCfgV4Algo::HW) => sej(xml, &seccfg.get_hash(), true, false, true, true).ok()?,
@@ -47,8 +47,8 @@ pub fn write_seccfg(xml: &mut Xml, seccfg: &mut SecCfgV4) -> Option<Vec<u8>> {
         _ => return None,
     };
 
-    seccfg.set_encrypted_hash(enc_hash);
-    let seccfg_data = seccfg.create();
+    seccfg.set_encrypted_hash(enc_hash.try_into().unwrap_or([0u8; 32]));
+    let seccfg_data = seccfg.create().ok()?;
 
     let progress = |_, _| {};
     let mut cursor = Cursor::new(&seccfg_data);

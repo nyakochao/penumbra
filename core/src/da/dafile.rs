@@ -3,10 +3,15 @@
     SPDX-FileCopyrightText: 2025 Shomy
 */
 use log::debug;
+use wincode::{Deserialize, SchemaRead, SchemaWrite};
 
 use crate::error::{Error, Result};
 use crate::utilities::hash::HashType;
 use crate::{le_u16, le_u32};
+
+const SECRO_PATTERN: &[u8] = b"AND_SECRO_v";
+const DA_V6_SIG: &[u8] = b"MTK_DA_v6";
+const DA_MAGIC: &[u8] = b"MTK_DOWNLOAD_AGENT";
 
 /// Protocol used by the DA
 /// - Legacy: Old DA, used in old devices
@@ -24,9 +29,10 @@ pub enum DAType {
 /// - Region 0: File Info (On XML Region 0 is the same as Region 1)
 /// - Region 1: First stage DA (DA1)
 /// - Region 2: Second stage DA (DA2)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, SchemaRead, SchemaWrite)]
 pub struct DAEntryRegion {
     /// Raw data of the region, including signature if any
+    #[wincode(skip)]
     pub data: Vec<u8>,
     /// Offset within the file itself, where the region starts
     pub offset: u32,
@@ -79,20 +85,17 @@ impl DAFile {
             && &raw_data[legacy_test_pos..legacy_test_pos + 2] == b"\xDA\xDA"
         {
             DAType::Legacy
-        } else if hdr.windows(9).any(|w| w == b"MTK_DA_v6") {
+        } else if hdr.windows(9).any(|w| w == DA_V6_SIG) {
             DAType::V6
         } else {
             DAType::V5
         };
 
-        if da_type != DAType::Legacy && !hdr.windows(0x12).any(|w| w == b"MTK_DOWNLOAD_AGENT") {
+        if da_type != DAType::Legacy && !hdr.starts_with(DA_MAGIC) {
             return Err(Error::penumbra("Invalid DA file: Missing MTK_DOWNLOAD_AGENT signature"));
         }
 
-        let _da_id = String::from_utf8_lossy(&hdr[0x20..0x60]).trim_end_matches('\0').to_string();
-        let _version = le_u32!(hdr, 0x60);
         let num_socs = le_u32!(hdr, 0x68);
-        let _magic_number = &hdr[0x64..0x68];
 
         let da_entry_size = match da_type {
             DAType::Legacy => 0xD8,
@@ -126,7 +129,7 @@ impl DAFile {
             // 0x10	entry_region_index	u16
             // 0x12	entry_region_count	u16
             // 0x14	region table starts
-            let mut current_region_offset = 0x14; // Starting from 0x14 to skip the data we already parsed
+            let mut curr_off = 0x14; // Starting from 0x14 to skip the data we already parsed
             for _ in 0..region_count {
                 // Each region entry is 20 bytes
                 // 0x00	offset (m_buf)	u32
@@ -134,34 +137,23 @@ impl DAFile {
                 // 0x08	addr (m_addr)	u32
                 // 0x0C	m_region_offset (m_len - m_sig_len)	u32
                 // 0x10	sig_len (m_sig_len)	u32
-                let region_header_data =
-                    &da_entry[current_region_offset..current_region_offset + 20];
-                let offset = le_u32!(region_header_data, 0x00);
-                let length = le_u32!(region_header_data, 0x04);
-                let addr = le_u32!(region_header_data, 0x08);
-                let sig_len = le_u32!(region_header_data, 0x10);
-                let region_data: Vec<u8> =
-                    raw_data[offset as usize..(offset + length) as usize].to_vec();
-                debug!(
-                    "Region: offset={:08X}, length={:08X}, addr={:08X}, sig_len={:08X}",
-                    offset, length, addr, sig_len
-                );
+
+                let mut region = DAEntryRegion::deserialize(&da_entry[curr_off..curr_off + 20])?;
+
+                let start = region.offset as usize;
+                let end = start + region.length as usize;
+
+                region.data = raw_data[start..end].to_vec();
+                //);
 
                 if inner_da_type != DAType::Legacy
-                    && region_data.windows(b"AND_SECRO_v".len()).any(|w| w == b"AND_SECRO_v")
+                    && region.data.windows(SECRO_PATTERN.len()).any(|w| w == SECRO_PATTERN)
                 {
                     inner_da_type = DAType::Legacy;
                 }
 
-                regions.push(DAEntryRegion {
-                    data: region_data,
-                    offset,
-                    length,
-                    addr,
-                    region_length: length - sig_len,
-                    sig_len,
-                });
-                current_region_offset += 20; // Move to the next region header
+                regions.push(region);
+                curr_off += 20; // Move to the next region header
             }
 
             das.push(DA { da_type: inner_da_type, regions, magic, hw_code, hw_sub_code });

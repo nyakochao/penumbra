@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 
 use log::{debug, error, info, trace, warn};
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::connection::Connection;
 use crate::connection::port::ConnectionType;
@@ -22,6 +23,15 @@ use crate::da::xflash::storage::detect_storage;
 use crate::da::{DA, DownloadProtocol};
 use crate::error::{Error, Result, XFlashError};
 use crate::le_u32;
+
+#[derive(SchemaRead, SchemaWrite)]
+struct EnvParams {
+    da_log_level: u32,
+    log_channel: u32,
+    system_os: u32,
+    ufs_provision: u32,
+    reserved: u32,
+}
 
 pub struct XFlash {
     pub conn: Connection,
@@ -81,7 +91,6 @@ impl XFlash {
     fn read_next_flow_header(&mut self) -> Result<PacketHeader> {
         loop {
             let mut buf = [0u8; PacketHeader::SIZE];
-            // Blocking read with a timeout using std (optional: implement timeout if needed)
             self.conn.read(&mut buf)?;
 
             let hdr = PacketHeader::from_bytes(&buf).ok_or_else(|| {
@@ -170,23 +179,14 @@ impl XFlash {
             2 // INFO
         };
 
+        //log_channel = 1: UART, 2: Usb, 3: Both
         let log_channel: u32 = 1 + self.usb_log_channel as u32;
 
-        // Force logs through UART regardless.
-        // For some reason, as the error mentioned above, the DA just hangs if we set logs
-        // through USB, regardless of the bootup mode.
-        // TODO: Figure out why!
-        let env_params: [u32; 5] = [
-            da_log_level, // da_log_level
-            log_channel,  // log_channel = 1: UART, 2: Usb, 3: Both
-            1,            // system_os = OS_LINUX
-            0,            // ufs_provision
-            0,            // reserved
-        ];
+        let env_params =
+            EnvParams { da_log_level, log_channel, system_os: 1, ufs_provision: 0, reserved: 0 };
+
         let mut env_buf = [0u8; 20];
-        for (i, v) in env_params.iter().enumerate() {
-            env_buf[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
-        }
+        wincode::serialize_into(&mut env_buf[..], &env_params)?;
 
         self.send_data(&[&(Cmd::SetupEnvironment as u32).to_le_bytes(), &env_buf])?;
 

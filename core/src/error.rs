@@ -41,6 +41,12 @@ pub enum Error {
     /// is there (e.g. XFlash)
     #[error("{ctx}: Status is 0x{status:X}")]
     Status { ctx: String, status: u32 },
+    #[error(transparent)]
+    Read(#[from] wincode::ReadError),
+    #[error(transparent)]
+    Write(#[from] wincode::WriteError),
+    #[error(transparent)]
+    HexDecode(#[from] hex::FromHexError),
 }
 
 impl Error {

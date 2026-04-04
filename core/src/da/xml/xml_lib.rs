@@ -143,25 +143,23 @@ impl Xml {
 
     /// Sends an acknowledgment to the device.
     /// By default, it sends "OK\0".
-    /// If a value is provided, it sends "OK@0x{value}\0".
-    pub fn ack(&mut self, value: Option<String>) -> Result<bool> {
-        let mut ack_str: String = "OK\0".to_string();
+    /// If a value is provided, it sends "OK@{value}\0".
+    pub fn ack(&mut self, value: Option<usize>) -> Result<bool> {
         if let Some(v) = value {
-            ack_str = format!("OK@0x{v}\0");
+            self.send(format!("OK@{v}\0").as_bytes())
+        } else {
+            self.send(b"OK\0")
         }
-
-        self.send(ack_str.as_bytes())?;
-        Ok(true)
     }
 
     /// Reads an acknowledgment from the device.
-    pub fn read_ack(&mut self) -> Result<bool> {
+    pub fn read_ack(&mut self) -> Result<()> {
         let resp = self.read_data()?;
         let s = String::from_utf8_lossy(&resp);
 
         // Check for OK or OK@0x0 (Ok with error code 0)
         if s == "OK\u{0}" || s == "OK@0x0\u{0}" {
-            return Ok(true);
+            return Ok(());
         }
 
         if s.contains("ERR!UNSUPPORTED") {
@@ -237,7 +235,7 @@ impl Xml {
         self.ack(None)?;
 
         // Tell the device the size we want to send
-        self.ack(format!("{:x}", size).into())?;
+        self.ack(Some(size))?;
         // Read the response
         self.read_ack()?;
 
@@ -251,7 +249,7 @@ impl Xml {
             reader.read_exact(&mut chunk[..to_read])?;
 
             // Status
-            self.ack("0".to_string().into())?;
+            self.ack(Some(0))?;
             self.read_ack()?;
 
             self.send(&chunk[..to_read])?;
@@ -385,7 +383,7 @@ impl Xml {
 
         debug!("Received file system operation command: {cmd}");
         self.ack(None)?;
-        self.ack(Some(op.default()))?;
+        self.send(format!("OK@{}\0", op.default()).as_bytes())?;
 
         Ok(true)
     }

@@ -38,7 +38,7 @@ pub fn parse_seccfg(xflash: &mut XFlash) -> Option<SecCfgV4> {
     None
 }
 
-pub fn write_seccfg(xflash: &mut XFlash, seccfg: &mut SecCfgV4) -> Option<Vec<u8>> {
+pub fn write_seccfg(xflash: &mut XFlash, seccfg: &mut SecCfgV4) -> Option<[u8; 512]> {
     let seccfg_part = xflash.dev_info.get_partition("seccfg")?;
     let section = xflash.get_storage()?.get_user_part();
 
@@ -56,8 +56,8 @@ pub fn write_seccfg(xflash: &mut XFlash, seccfg: &mut SecCfgV4) -> Option<Vec<u8
         _ => return None,
     };
 
-    seccfg.set_encrypted_hash(enc_hash);
-    let seccfg_data = seccfg.create();
+    seccfg.set_encrypted_hash(enc_hash.try_into().unwrap_or([0u8; 32]));
+    let seccfg_data = seccfg.create().ok()?;
 
     let progress = |_, _| {};
     let mut cursor = Cursor::new(&seccfg_data);

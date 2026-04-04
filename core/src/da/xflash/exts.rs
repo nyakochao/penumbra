@@ -5,6 +5,7 @@
 use std::io::{Cursor, Read, Write};
 
 use log::{debug, info};
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::core::storage::{RPMB_FRAME_DATA_SZ, RpmbRegion};
 use crate::da::DownloadProtocol;
@@ -19,6 +20,7 @@ const DA_EXT: &[u8] = include_bytes!("../../../payloads/da_x.bin");
 const RPMB_WRITE_PKT_LEN: usize = 32 * 1024;
 
 #[repr(C)]
+#[derive(SchemaRead, SchemaWrite)]
 struct DACtx {
     sej_base: u32,
     tzcc_base: u32,
@@ -34,14 +36,8 @@ impl DACtx {
     pub fn to_bytes(&self) -> [u8; 32] {
         let mut out = [0u8; 32];
 
-        out[0..4].copy_from_slice(&self.sej_base.to_le_bytes());
-        out[4..8].copy_from_slice(&self.tzcc_base.to_le_bytes());
-        out[8..12].copy_from_slice(&self.da2_base.to_le_bytes());
-        out[12..16].copy_from_slice(&self.da2_size.to_le_bytes());
-        out[16..20].copy_from_slice(&self.write_pkt_len.to_le_bytes());
-        out[20..24].copy_from_slice(&self.read_pkt_len.to_le_bytes());
-        out[24..28].copy_from_slice(&self.storage_type.to_le_bytes());
-        out[28..32].copy_from_slice(&self.usb_log.to_le_bytes());
+        // Should never fail
+        wincode::serialize_into(&mut out[..], self).unwrap();
 
         out
     }

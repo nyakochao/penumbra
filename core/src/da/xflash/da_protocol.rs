@@ -6,6 +6,7 @@ use std::io::{Cursor, Read, Write};
 use std::sync::Arc;
 
 use log::{debug, error, info};
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::connection::Connection;
 use crate::connection::port::ConnectionType;
@@ -34,6 +35,26 @@ use crate::error::{Error, Result, XFlashError};
 #[cfg(not(feature = "no_exploits"))]
 use crate::exploit::{Carbonara, Exploit, Kamakiri};
 use crate::{exploit, le_u32};
+
+#[derive(SchemaRead, SchemaWrite)]
+struct RebootParams {
+    /// If set, the device will reboot into the
+    /// specified bootup mode.
+    is_dev_reboot: u32,
+    /// WDT timeout
+    timeout_ms: u32,
+    async_flag: u32,
+    /// The boot mode (Normal, Fastboot...)
+    bootup: u32,
+    /// Whether the Download Bit is set or not,
+    /// which will make the device enter download
+    /// mode on the next boot if set.
+    dlbit: u32,
+    not_reset_rtc_time: u32,
+    /// If set, the device will not disconnect the
+    /// USB connection during reboot.
+    not_disconnect_usb: u32,
+}
 
 impl DownloadProtocol for XFlash {
     fn upload_da(&mut self) -> Result<bool> {
@@ -144,20 +165,18 @@ impl DownloadProtocol for XFlash {
     fn shutdown(&mut self) -> Result<()> {
         self.send_cmd(Cmd::Shutdown)?;
 
-        let params: [u32; 7] = [
-            0, // is_dev_reboot (0 = shutdown)
-            0, // timeout_ms (unused when not rebooting)
-            0, // async
-            0, // bootup
-            0, // dlbit
-            0, // bNotResetRTCTime (0 = reset RTC)
-            0, // bNotDisconnectUSB (0 = disconnect USB)
-        ];
+        let params = RebootParams {
+            is_dev_reboot: 0,
+            timeout_ms: 0,
+            async_flag: 0,
+            bootup: 0,
+            dlbit: 0,
+            not_reset_rtc_time: 0,
+            not_disconnect_usb: 0,
+        };
 
         let mut buf = [0u8; 28];
-        for (i, v) in params.iter().enumerate() {
-            buf[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
-        }
+        wincode::serialize_into(&mut buf[..], &params)?;
 
         info!("Shutting down device...");
 
@@ -177,20 +196,18 @@ impl DownloadProtocol for XFlash {
             _ => 0,
         };
 
-        let params: [u32; 7] = [
-            1,      // is_dev_reboot
-            0,      // timeout_ms (0 = default, WDT decides)
-            0,      // async
-            bootup, // bootup
-            0,      // dlbit
-            0,      // bNotResetRTCTime
-            0,      // bNotDisconnectUSB
-        ];
+        let params = RebootParams {
+            is_dev_reboot: 1,
+            timeout_ms: 0,
+            async_flag: 0,
+            bootup,
+            dlbit: 0,
+            not_reset_rtc_time: 0,
+            not_disconnect_usb: 0,
+        };
 
         let mut buf = [0u8; 28];
-        for (i, v) in params.iter().enumerate() {
-            buf[i * 4..(i + 1) * 4].copy_from_slice(&v.to_le_bytes());
-        }
+        wincode::serialize_into(&mut buf[..], &params)?;
 
         info!("Rebooting device into {:?} mode...", bootmode);
 
@@ -376,7 +393,7 @@ impl DownloadProtocol for XFlash {
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>> {
+    fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<[u8; 512]> {
         let seccfg = parse_seccfg(self);
         if seccfg.is_none() {
             error!("[Penumbra] Failed to parse seccfg, cannot set lock state");

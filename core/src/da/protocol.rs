@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::sync::Arc;
 
 use enum_dispatch::enum_dispatch;
+use wincode::{Deserialize, SchemaRead, SchemaWrite};
 
 use crate::DeviceLog;
 use crate::connection::Connection;
@@ -40,10 +41,12 @@ impl BootMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, SchemaRead, SchemaWrite)]
 #[repr(u32)]
 pub enum DataType {
+    #[wincode(tag = 1)]
     Flow = 0x1,
+    #[wincode(tag = 2)]
     Message = 0x2,
 }
 
@@ -69,7 +72,7 @@ impl DataType {
 /// For `Message` packets, the payload starts with a 4 byte priority
 /// field followed by the actual message body.
 /// The length of a `Message` packet also includes the 4 byte from priority.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, SchemaRead, SchemaWrite)]
 pub struct PacketHeader {
     pub magic: u32,
     pub data_type: DataType,
@@ -87,20 +90,21 @@ impl PacketHeader {
         if raw.len() < Self::SIZE {
             return None;
         }
-        let magic = u32::from_le_bytes(raw[0..4].try_into().unwrap());
-        if magic != MAGIC {
+
+        let hdr = Self::deserialize(raw).ok()?;
+        if hdr.magic != MAGIC {
             return None;
         }
-        let data_type = DataType::from_u32(u32::from_le_bytes(raw[4..8].try_into().unwrap()))?;
-        let length = u32::from_le_bytes(raw[8..12].try_into().unwrap());
-        Some(Self { magic, data_type, length })
+
+        Some(hdr)
     }
 
     pub fn to_bytes(&self) -> [u8; Self::SIZE] {
         let mut buf = [0u8; Self::SIZE];
-        buf[0..4].copy_from_slice(&self.magic.to_le_bytes());
-        buf[4..8].copy_from_slice(&(self.data_type as u32).to_le_bytes());
-        buf[8..12].copy_from_slice(&self.length.to_le_bytes());
+
+        // This will never fail, so it's safe to unwrap.
+        wincode::serialize_into(&mut buf[..], self).unwrap();
+
         buf
     }
 }
@@ -215,7 +219,7 @@ pub trait DownloadProtocol {
 
     // Sec
     #[cfg(not(feature = "no_exploits"))]
-    fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>>;
+    fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<[u8; 512]>;
 
     #[cfg(not(feature = "no_exploits"))]
     fn peek<W, F>(&mut self, addr: u32, length: usize, writer: W, progress: F) -> Result<()>

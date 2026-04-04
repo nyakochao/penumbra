@@ -749,7 +749,7 @@ impl Device {
     /// let seccfg = device.set_seccfg_lock_state(LockFlag::Unlock).await;
     /// ```
     #[cfg(not(feature = "no_exploits"))]
-    pub fn set_seccfg_lock_state(&mut self, lock_state: LockFlag) -> Option<Vec<u8>> {
+    pub fn set_seccfg_lock_state(&mut self, lock_state: LockFlag) -> Option<[u8; 512]> {
         // Ensure DA mode first; this will populate partitions and storage
         self.ensure_da_mode().ok()?;
         let protocol = self.protocol.as_mut().unwrap();

@@ -42,7 +42,7 @@ pub fn to_thumb_addr(pos: usize, base_addr: u32) -> u32 {
     ((pos as u32) + base_addr) | 1
 }
 
-pub fn encode_bl(src: u32, dst: u32) -> Vec<u8> {
+pub fn encode_bl(src: u32, dst: u32) -> u32 {
     let off = dst as i32 - (src as i32 + 4);
     let hi = ((off >> 12) & 0x7FF) as u16;
     let lo = ((off >> 1) & 0x7FF) as u16;
@@ -50,7 +50,7 @@ pub fn encode_bl(src: u32, dst: u32) -> Vec<u8> {
     let hi_bytes = (0xF000 | hi).to_le_bytes();
     let lo_bytes = (0xF800 | lo).to_le_bytes();
 
-    vec![hi_bytes[0], hi_bytes[1], lo_bytes[0], lo_bytes[1]]
+    u32::from_le_bytes([hi_bytes[0], hi_bytes[1], lo_bytes[0], lo_bytes[1]])
 }
 
 pub fn encode_bl_arm(src: u32, dst: u32) -> Result<u32> {

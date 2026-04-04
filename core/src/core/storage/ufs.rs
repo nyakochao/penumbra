@@ -2,23 +2,27 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
-use async_trait::async_trait;
+use wincode::{Deserialize, SchemaRead, SchemaWrite};
 
 use crate::core::storage::{PartitionKind, Storage, StorageType};
 use crate::error::{Error, Result};
 use crate::utilities::xml::{get_tag, get_tag_usize};
 
-#[derive(Debug)]
+#[repr(C)]
+#[derive(Debug, SchemaRead, SchemaWrite)]
 pub struct UfsInfo {
     pub kind: u32,
     pub block_size: u32,
     pub lu0_size: u64,
     pub lu1_size: u64,
     pub lu2_size: u64,
+    #[wincode(skip)]
     pub lu3_size: u64,
-    pub cid: Vec<u8>,
-    pub fwver: Vec<u8>,
-    pub serial: Vec<u8>,
+    pub vendor_id: u16,
+    pub cid: [u8; 20],
+    pub fwver: [u8; 8],
+    pub serial: [u8; 132],
+    reserved: [u8; 8],
 }
 
 #[repr(u32)]
@@ -111,40 +115,12 @@ impl UfsStorage {
             return Err(Error::io("UFS response data too short"));
         }
 
-        let mut pos = 0;
+        let mut ufs_info = UfsInfo::deserialize(data)?;
+        // On XFlash, MTK was so nice to not expose LU3 (RPMB) size on the
+        // response payload, thus we have to hardcode it to 0 :(
+        ufs_info.lu3_size = 0;
 
-        // 0x30 == UFS
-        let kind = u32::from_le_bytes(data[pos..pos + 4].try_into().unwrap());
-        let block_size = u32::from_le_bytes(data[pos + 4..pos + 8].try_into().unwrap());
-        pos += 8;
-
-        let lu0_size = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
-        pos += 8;
-        let lu1_size = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
-        pos += 8;
-        let lu2_size = u64::from_le_bytes(data[pos..pos + 8].try_into().unwrap());
-        pos += 8;
-        let lu3_size = 0u64; // Thank you MTK
-
-        let cid = data[pos..pos + 16].to_vec();
-        pos += 16;
-
-        let fwver = data[pos + 0x16..pos + 0x1A].to_vec();
-        let serial = data[pos + 0x1E..pos + 0x2A].to_vec();
-
-        Ok(UfsStorage {
-            info: UfsInfo {
-                kind,
-                block_size,
-                lu0_size,
-                lu1_size,
-                lu2_size,
-                lu3_size,
-                cid,
-                fwver,
-                serial,
-            },
-        })
+        Ok(UfsStorage { info: ufs_info })
     }
 
     pub fn from_xml_response(xml: &str) -> Result<Self> {
@@ -156,8 +132,9 @@ impl UfsStorage {
 
         // Older devices use ufs_cid, newer ones use id
         let cid_str: String = get_tag(xml, "ufs/ufs_cid").or_else(|_| get_tag(xml, "ufs/id"))?;
-        let cid = hex::decode(cid_str.trim_start_matches("0x"))
-            .map_err(|_| Error::io("Failed to parse UFS CID from XML"))?;
+        let mut cid = [0u8; 20];
+
+        hex::decode_to_slice(cid_str.trim_start_matches("0x"), &mut cid)?;
 
         Ok(UfsStorage {
             info: UfsInfo {
@@ -167,9 +144,11 @@ impl UfsStorage {
                 lu1_size,
                 lu2_size,
                 lu3_size,
+                vendor_id: 0,
                 cid,
-                fwver: Vec::new(),
-                serial: Vec::new(),
+                fwver: [0u8; 8],
+                serial: [0u8; 132],
+                reserved: [0u8; 8],
             },
         })
     }

@@ -289,7 +289,7 @@ impl DownloadProtocol for Xml {
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<Vec<u8>> {
+    fn set_seccfg_lock_state(&mut self, locked: LockFlag) -> Option<[u8; 512]> {
         let mut seccfg = match parse_seccfg(self) {
             Some(s) => s,
             None => {
