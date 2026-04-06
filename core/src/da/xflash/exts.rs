@@ -7,7 +7,7 @@ use std::io::{Cursor, Read, Write};
 use log::{debug, info};
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::core::storage::{RPMB_FRAME_DATA_SZ, RpmbRegion};
+use crate::core::storage::{RPMB_FRAME_DATA_SZ, RpmbRegion, Storage};
 use crate::da::DownloadProtocol;
 use crate::da::xflash::{Cmd, XFlash};
 use crate::error::{Error, Result};

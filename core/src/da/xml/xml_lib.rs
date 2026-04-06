@@ -3,7 +3,6 @@
     SPDX-FileCopyrightText: 2025 Shomy
 */
 use std::io::{BufWriter, Write};
-use std::sync::Arc;
 
 use log::{debug, error, info, trace, warn};
 
@@ -12,7 +11,7 @@ use crate::connection::Connection;
 use crate::core::auth::{AuthManager, SignData, SignPurpose, SignRequest};
 use crate::core::devinfo::DeviceInfo;
 use crate::core::log_buffer::DeviceLog;
-use crate::core::storage::Storage;
+use crate::core::storage::StorageKind;
 use crate::da::protocol::{DAProtocolParams, DataType, PacketHeader};
 use crate::da::xml::cmds::{
     CMD_END,
@@ -429,17 +428,13 @@ impl Xml {
         Ok(true)
     }
 
-    pub(super) fn get_or_detect_storage(&mut self) -> Option<Arc<dyn Storage>> {
-        if let Some(storage) = self.dev_info.storage() {
-            return Some(storage);
+    pub(super) fn get_or_detect_storage(&mut self) -> Option<StorageKind> {
+        if self.dev_info.storage().is_none() {
+            let detected = detect_storage(self)?;
+            self.dev_info.set_storage(detected);
         }
 
-        if let Some(storage) = detect_storage(self) {
-            self.dev_info.set_storage(storage.clone());
-            return Some(storage);
-        }
-
-        None
+        self.dev_info.storage()
     }
 
     pub fn get_upload_file_resp(&mut self) -> Result<String> {

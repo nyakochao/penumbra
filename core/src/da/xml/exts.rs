@@ -7,7 +7,7 @@ use std::io::{Cursor, Read, Write};
 use log::{debug, info};
 use xmlcmd_derive::XmlCommand;
 
-use crate::core::storage::{RPMB_FRAME_DATA_SZ, RpmbRegion, StorageType};
+use crate::core::storage::{RPMB_FRAME_DATA_SZ, RpmbRegion, Storage, StorageType};
 use crate::da::DownloadProtocol;
 use crate::da::xml::Xml;
 use crate::da::xml::cmds::{XmlCmdLifetime, XmlCommand};

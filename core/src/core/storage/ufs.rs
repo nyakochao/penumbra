@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 use crate::utilities::xml::{get_tag, get_tag_usize};
 
 #[repr(C)]
-#[derive(Debug, SchemaRead, SchemaWrite)]
+#[derive(Debug, SchemaRead, SchemaWrite, Clone)]
 pub struct UfsInfo {
     pub kind: u32,
     pub block_size: u32,
@@ -63,6 +63,7 @@ impl UfsPartition {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct UfsStorage {
     pub info: UfsInfo,
 }

@@ -3,7 +3,6 @@
     SPDX-FileCopyrightText: 2025 Shomy
 */
 use std::io::{Read, Write};
-use std::sync::Arc;
 
 use enum_dispatch::enum_dispatch;
 use wincode::{Deserialize, SchemaRead, SchemaWrite};
@@ -14,7 +13,7 @@ use crate::connection::port::ConnectionType;
 use crate::core::chip::ChipInfo;
 use crate::core::devinfo::DeviceInfo;
 use crate::core::seccfg::LockFlag;
-use crate::core::storage::{Partition, PartitionKind, RpmbRegion, Storage, StorageType};
+use crate::core::storage::{Partition, PartitionKind, RpmbRegion, StorageKind, StorageType};
 use crate::da::{DA, DAEntryRegion, XFlash, Xml};
 use crate::error::Result;
 
@@ -201,12 +200,12 @@ pub trait DownloadProtocol {
     fn get_connection(&mut self) -> &mut Connection;
     fn set_connection_type(&mut self, conn_type: ConnectionType) -> Result<()>;
 
-    fn get_storage(&mut self) -> Option<Arc<dyn Storage>>;
+    fn get_storage(&mut self) -> Option<StorageKind>;
     fn get_storage_type(&mut self) -> StorageType;
     fn get_partitions(&mut self) -> Vec<Partition>;
 
     // DevInfo helpers
-    fn get_devinfo(&self) -> &DeviceInfo;
+    fn get_devinfo(&self) -> DeviceInfo;
     fn get_da(&self) -> &DA;
 
     fn chip(&self) -> &'static ChipInfo {

@@ -1,28 +1,27 @@
 /*
     SPDX-License-Identifier: AGPL-3.0-or-later
-    SPDX-FileCopyrightText: 2025 Shomy
+    SPDX-FileCopyrightText: 2026 Shomy
 */
+
 use std::sync::{Arc, RwLock};
 
 use crate::core::chip::{ChipInfo, UNKNOWN_CHIP};
-use crate::core::storage::{Partition, Storage};
+use crate::core::storage::{Partition, StorageKind};
 
-/// Safe wrapper around device information with async read/write access.
 #[derive(Clone)]
 pub struct DeviceInfo {
-    inner: Arc<RwLock<DevInfoData>>,
+    data: Arc<RwLock<DevInfoData>>,
     chip: Arc<RwLock<&'static ChipInfo>>,
+    storage: Arc<RwLock<Option<StorageKind>>>,
 }
 
 /// Struct holding device information data.
-/// This should not be accessed directly, instead use the `DeviceInfo` wrapper.
-#[derive(Clone, Default)]
+#[derive(Default, Clone)]
 pub struct DevInfoData {
-    pub soc_id: Vec<u8>,
-    pub meid: Vec<u8>,
+    pub soc_id: [u8; 32],
+    pub meid: [u8; 16],
     pub hw_code: u16,
     pub partitions: Vec<Partition>,
-    pub storage: Option<Arc<dyn Storage + Send + Sync>>,
     pub target_config: u32,
 }
 
@@ -32,12 +31,11 @@ impl DeviceInfo {
     }
 
     pub fn get_data(&self) -> DevInfoData {
-        self.inner.read().unwrap().clone()
+        self.data.read().unwrap().clone()
     }
 
     pub fn set_data(&self, data: DevInfoData) {
-        let mut write_guard = self.inner.write().unwrap();
-        *write_guard = data;
+        *self.data.write().unwrap() = data;
     }
 
     pub fn chip(&self) -> &'static ChipInfo {
@@ -45,8 +43,6 @@ impl DeviceInfo {
     }
 
     pub fn set_chip(&self, chip: &'static ChipInfo) {
-        // It's okay to unwrap here. If there's an error,
-        // it means something went very wrong to begin with :D!
         *self.chip.write().unwrap() = chip;
     }
 }
@@ -54,69 +50,69 @@ impl DeviceInfo {
 impl Default for DeviceInfo {
     fn default() -> Self {
         Self {
-            inner: Arc::new(RwLock::new(DevInfoData::default())),
+            data: Arc::new(RwLock::new(DevInfoData::default())),
             chip: Arc::new(RwLock::new(&UNKNOWN_CHIP)),
+            storage: Arc::new(RwLock::new(None)),
         }
     }
 }
 
 impl DeviceInfo {
-    pub fn soc_id(&self) -> Vec<u8> {
-        self.inner.read().unwrap().soc_id.clone()
+    pub fn soc_id(&self) -> [u8; 32] {
+        self.data.read().unwrap().soc_id
     }
 
-    pub fn meid(&self) -> Vec<u8> {
-        self.inner.read().unwrap().meid.clone()
+    pub fn meid(&self) -> [u8; 16] {
+        self.data.read().unwrap().meid
     }
 
     pub fn hw_code(&self) -> u16 {
-        self.inner.read().unwrap().hw_code
+        self.data.read().unwrap().hw_code
     }
 
     pub fn partitions(&self) -> Vec<Partition> {
-        self.inner.read().unwrap().partitions.clone()
+        self.data.read().unwrap().partitions.clone()
     }
 
-    pub fn storage(&self) -> Option<Arc<dyn Storage + Send + Sync>> {
-        self.inner.read().unwrap().storage.clone()
+    pub fn storage(&self) -> Option<StorageKind> {
+        self.storage.read().unwrap().clone()
     }
 
-    pub fn set_storage(&self, storage: Arc<dyn Storage + Send + Sync>) {
-        let mut write_guard = self.inner.write().unwrap();
-        write_guard.storage = Some(storage);
+    pub fn set_storage(&self, storage: StorageKind) {
+        *self.storage.write().unwrap() = Some(storage);
     }
 
     pub fn get_partition(&self, name: &str) -> Option<Partition> {
-        let partitions = self.inner.read().unwrap().partitions.clone();
-        partitions.into_iter().find(|p| p.name.eq_ignore_ascii_case(name))
+        self.data
+            .read()
+            .unwrap()
+            .partitions
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case(name))
+            .cloned()
     }
 
     pub fn set_partitions(&self, partitions: Vec<Partition>) {
-        let mut write_guard = self.inner.write().unwrap();
-        write_guard.partitions = partitions;
+        self.data.write().unwrap().partitions = partitions;
     }
 
     pub fn target_config(&self) -> u32 {
-        self.inner.read().unwrap().target_config
+        self.data.read().unwrap().target_config
     }
 
     pub fn set_target_config(&self, cfg: u32) {
-        let mut write_guard = self.inner.write().unwrap();
-        write_guard.target_config = cfg;
+        self.data.write().unwrap().target_config = cfg;
     }
 
     pub fn sbc_enabled(&self) -> bool {
-        let target_config = self.inner.read().unwrap().target_config;
-        (target_config & 0x1) != 0
+        (self.data.read().unwrap().target_config & 0x1) != 0
     }
 
     pub fn sla_enabled(&self) -> bool {
-        let target_config = self.inner.read().unwrap().target_config;
-        (target_config & 0x2) != 0
+        (self.data.read().unwrap().target_config & 0x2) != 0
     }
 
     pub fn daa_enabled(&self) -> bool {
-        let target_config = self.inner.read().unwrap().target_config;
-        (target_config & 0x4) != 0
+        (self.data.read().unwrap().target_config & 0x4) != 0
     }
 }

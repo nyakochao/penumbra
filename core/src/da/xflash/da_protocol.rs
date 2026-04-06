@@ -3,7 +3,6 @@
     SPDX-FileCopyrightText: 2025 Shomy
 */
 use std::io::{Cursor, Read, Write};
-use std::sync::Arc;
 
 use log::{debug, error, info};
 use wincode::{SchemaRead, SchemaWrite};
@@ -12,7 +11,15 @@ use crate::connection::Connection;
 use crate::connection::port::ConnectionType;
 use crate::core::devinfo::DeviceInfo;
 use crate::core::seccfg::LockFlag;
-use crate::core::storage::{Gpt, Partition, PartitionKind, RpmbRegion, Storage, StorageType};
+use crate::core::storage::{
+    Gpt,
+    Partition,
+    PartitionKind,
+    RpmbRegion,
+    Storage,
+    StorageKind,
+    StorageType,
+};
 use crate::da::protocol::BootMode;
 use crate::da::xflash::cmds::*;
 #[cfg(not(feature = "no_exploits"))]
@@ -337,7 +344,7 @@ impl DownloadProtocol for XFlash {
         self.get_or_detect_storage().map_or(StorageType::Unknown, |s| s.kind())
     }
 
-    fn get_storage(&mut self) -> Option<Arc<dyn Storage>> {
+    fn get_storage(&mut self) -> Option<StorageKind> {
         self.get_or_detect_storage()
     }
 
@@ -475,8 +482,8 @@ impl DownloadProtocol for XFlash {
         patch::patch_da2(self).ok()
     }
 
-    fn get_devinfo(&self) -> &DeviceInfo {
-        &self.dev_info
+    fn get_devinfo(&self) -> DeviceInfo {
+        self.dev_info.clone()
     }
 
     fn get_da(&self) -> &DA {

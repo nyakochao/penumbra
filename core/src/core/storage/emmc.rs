@@ -10,7 +10,7 @@ use crate::error::{Error, Result};
 use crate::utilities::xml::{get_tag, get_tag_usize};
 
 /// Represents eMMC storage information.
-#[derive(Debug, SchemaRead, SchemaWrite)]
+#[derive(Debug, SchemaRead, SchemaWrite, Clone)]
 pub struct EmmcInfo {
     /// eMMC kind (EMMC or SDMMC)
     pub kind: u32,
@@ -83,6 +83,7 @@ impl EmmcPartition {
 }
 
 /// Represents eMMC storage device.
+#[derive(Debug, Clone)]
 pub struct EmmcStorage {
     /// eMMC storage information.
     pub info: EmmcInfo,

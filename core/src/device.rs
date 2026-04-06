@@ -182,8 +182,7 @@ impl Device {
         let hw_code = conn.get_hw_code()?;
         let target_config = conn.get_target_config()?;
 
-        let device_info =
-            DevInfoData { soc_id, meid, hw_code, storage: None, partitions: vec![], target_config };
+        let device_info = DevInfoData { soc_id, meid, hw_code, partitions: vec![], target_config };
 
         self.dev_info.set_data(device_info);
         let chip = chip_from_hw_code(hw_code);

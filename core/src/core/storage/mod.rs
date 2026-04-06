@@ -3,8 +3,11 @@ pub mod gpt;
 pub mod ufs;
 
 pub use emmc::EmmcPartition;
+use emmc::EmmcStorage;
+use enum_dispatch::enum_dispatch;
 pub use gpt::Gpt;
 pub use ufs::UfsPartition;
+use ufs::UfsStorage;
 
 pub const RPMB_FRAME_DATA_SZ: usize = 0x100;
 
@@ -77,7 +80,15 @@ impl PartitionKind {
     }
 }
 
-pub trait Storage: Send + Sync {
+#[enum_dispatch(Storage)]
+#[derive(Clone)]
+pub enum StorageKind {
+    Emmc(EmmcStorage),
+    Ufs(UfsStorage),
+}
+
+#[enum_dispatch]
+pub trait Storage {
     fn kind(&self) -> StorageType;
     fn block_size(&self) -> u32;
     fn total_size(&self) -> u64;

@@ -2,17 +2,16 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
-use std::sync::Arc;
 
 use log::debug;
 
-use crate::core::storage::Storage;
+use crate::core::storage::StorageKind;
 use crate::core::storage::emmc::EmmcStorage;
 use crate::core::storage::ufs::UfsStorage;
 use crate::da::xflash::{Cmd, XFlash};
 
 // TODO: Avoid repeated logic
-pub fn detect_storage(xflash: &mut XFlash) -> Option<Arc<dyn Storage>> {
+pub fn detect_storage(xflash: &mut XFlash) -> Option<StorageKind> {
     let emmc_response = xflash.devctrl(Cmd::GetEmmcInfo, None);
     let ufs_response = xflash.devctrl(Cmd::GetUfsInfo, None);
 
@@ -23,7 +22,7 @@ pub fn detect_storage(xflash: &mut XFlash) -> Option<Arc<dyn Storage>> {
     {
         debug!("eMMC storage detected.");
         if let Ok(storage) = EmmcStorage::from_response(&resp) {
-            return Some(Arc::new(storage));
+            return Some(StorageKind::Emmc(storage));
         }
     }
 
@@ -32,7 +31,7 @@ pub fn detect_storage(xflash: &mut XFlash) -> Option<Arc<dyn Storage>> {
     {
         debug!("UFS storage detected.");
         if let Ok(storage) = UfsStorage::from_response(&resp) {
-            return Some(Arc::new(storage));
+            return Some(StorageKind::Ufs(storage));
         }
     }
 

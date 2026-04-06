@@ -5,6 +5,7 @@
 use std::io::Cursor;
 
 use crate::core::seccfg::{SecCfgV4, SecCfgV4Algo};
+use crate::core::storage::Storage;
 use crate::da::xflash::exts::sej;
 use crate::da::{DownloadProtocol, XFlash};
 
