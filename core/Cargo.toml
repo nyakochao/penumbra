@@ -38,7 +38,7 @@ wincode = { version = "0.5.1", features = ["derive"] }
 xmlcmd-derive = { path = "xmlcmd_derive" }
 
 [features]
-default = ["libusb"]
+default = ["nusb"]
 libusb = ["rusb"]
 serial = ["serialport",]
 libusb-exp = []
