@@ -170,22 +170,17 @@ impl Connection {
         Ok((hw_sub_code, hw_ver, sw_ver))
     }
 
-    pub fn get_soc_id(&mut self) -> Result<Vec<u8>> {
+    pub fn get_soc_id(&mut self) -> Result<[u8; 32]> {
+        let mut soc_id = [0u8; 32];
+
         self.echo(&[Command::GetSocId as u8], 1)?;
 
-        let mut length_bytes = [0u8; 4];
+        let length = self.read_u32_be()? as usize;
 
-        // Synchronous version: just read, no timeout
-        let read_result = self.port.read_exact(&mut length_bytes);
+        if length > soc_id.len() {
+            return Err(Error::conn("Invalid SoC ID length"));
+        }
 
-        let length_bytes = match read_result {
-            Ok(_) => length_bytes,
-            Err(e) => return Err(e), // I/O error
-        };
-
-        let length = u32::from_be_bytes(length_bytes) as usize;
-
-        let mut soc_id = vec![0u8; length];
         self.port.read_exact(&mut soc_id)?;
 
         let status = self.read_u16_le()?;
@@ -198,11 +193,12 @@ impl Connection {
         Ok(soc_id)
     }
 
-    pub fn get_meid(&mut self) -> Result<Vec<u8>> {
+    pub fn get_meid(&mut self) -> Result<[u8; 16]> {
         self.port.write_all(&[Command::GetMeId as u8])?;
-
         let mut echo = [0u8; 1];
         self.port.read_exact(&mut echo)?;
+
+        let mut meid = [0u8; 16];
 
         // IQO Preloader seems to have a custom security gate that blocks most commands
         // behind an OEM authentication challenge (0x90/0x91). Only a small whitelist of
@@ -219,18 +215,12 @@ impl Connection {
             return Err(Error::conn("Data mismatch"));
         }
 
-        let mut length_bytes = [0u8; 4];
+        let length = self.read_u32_be()? as usize;
 
-        let read_result = self.port.read_exact(&mut length_bytes);
+        if length > meid.len() {
+            return Err(Error::conn("Invalid MEID length"));
+        }
 
-        let length_bytes = match read_result {
-            Ok(_) => length_bytes,
-            Err(e) => return Err(e), // I/O error
-        };
-
-        let length = u32::from_be_bytes(length_bytes) as usize;
-
-        let mut meid = vec![0u8; length];
         self.port.read_exact(&mut meid)?;
 
         let status = self.read_u16_le()?;
