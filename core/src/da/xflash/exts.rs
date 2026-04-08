@@ -173,7 +173,7 @@ pub fn peek<W, F>(
     addr: u32,
     length: usize,
     writer: W,
-    mut progress: F,
+    progress: F,
 ) -> Result<()>
 where
     W: Write + Send,
@@ -184,7 +184,7 @@ where
     range[8..16].copy_from_slice(&(length as u64).to_le_bytes());
 
     xflash.devctrl(Cmd::ExtReadMem, Some(&[&range]))?;
-    xflash.upload_data(length, writer, &mut progress)?;
+    xflash.upload_data(length, writer, progress)?;
 
     status_ok!(xflash);
 
@@ -196,7 +196,7 @@ pub fn poke<R, F>(
     addr: u32,
     length: usize,
     reader: R,
-    mut progress: F,
+    progress: F,
 ) -> Result<()>
 where
     R: Read + Send,
@@ -207,7 +207,7 @@ where
     range[8..16].copy_from_slice(&(length as u64).to_le_bytes());
 
     xflash.devctrl(Cmd::ExtWriteMem, Some(&[&range]))?;
-    xflash.download_data(length, reader, &mut progress)?;
+    xflash.download_data(length, reader, progress)?;
 
     status_ok!(xflash);
 
@@ -263,7 +263,7 @@ pub fn read_rpmb<W, F>(
     start_sector: u32,
     sectors_count: u32,
     writer: W,
-    mut progress: F,
+    progress: F,
 ) -> Result<()>
 where
     W: Write + Send,
@@ -292,7 +292,7 @@ where
     let data_len = sectors_count as usize * RPMB_FRAME_DATA_SZ;
 
     xflash.devctrl(Cmd::ExtRpmbRead, Some(&[&region, &sector_range]))?;
-    xflash.upload_data(data_len, writer, &mut progress)?;
+    xflash.upload_data(data_len, writer, progress)?;
     status_ok!(xflash);
 
     Ok(())
@@ -304,7 +304,7 @@ pub fn write_rpmb<R, F>(
     start_sector: u32,
     sectors_count: u32,
     reader: R,
-    mut progress: F,
+    progress: F,
 ) -> Result<()>
 where
     R: Read + Send,
@@ -333,7 +333,7 @@ where
     let data_len = sectors_count as usize * RPMB_FRAME_DATA_SZ;
 
     xflash.devctrl(Cmd::ExtRpmbWrite, Some(&[&region, &sector_range]))?;
-    xflash.download_data_with(data_len, RPMB_WRITE_PKT_LEN, reader, &mut progress)?;
+    xflash.download_data_with(data_len, RPMB_WRITE_PKT_LEN, reader, progress)?;
     status_ok!(xflash);
 
     Ok(())

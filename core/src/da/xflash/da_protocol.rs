@@ -229,8 +229,8 @@ impl DownloadProtocol for XFlash {
         addr: u64,
         size: usize,
         section: PartitionKind,
-        progress: F,
         writer: W,
+        progress: F,
     ) -> Result<()>
     where
         W: Write + Send,
@@ -243,15 +243,15 @@ impl DownloadProtocol for XFlash {
         &mut self,
         addr: u64,
         size: usize,
-        mut reader: R,
         section: PartitionKind,
-        mut progress: F,
+        reader: R,
+        progress: F,
     ) -> Result<()>
     where
         R: Read + Send,
         F: FnMut(usize, usize) + Send,
     {
-        flash::write_flash(self, addr, size, &mut reader, section, &mut progress)
+        flash::write_flash(self, addr, size, section, reader, progress)
     }
 
     fn erase_flash<F>(
@@ -259,41 +259,35 @@ impl DownloadProtocol for XFlash {
         addr: u64,
         size: usize,
         section: PartitionKind,
-        mut progress: F,
+        progress: F,
     ) -> Result<()>
     where
         F: FnMut(usize, usize) + Send,
     {
-        flash::erase_flash(self, addr, size, section, &mut progress)
+        flash::erase_flash(self, addr, size, section, progress)
     }
 
-    fn download<R, F>(
-        &mut self,
-        part_name: String,
-        size: usize,
-        mut reader: R,
-        mut progress: F,
-    ) -> Result<()>
+    fn download<R, F>(&mut self, part_name: &str, size: usize, reader: R, progress: F) -> Result<()>
     where
         R: Read + Send,
         F: FnMut(usize, usize) + Send,
     {
-        flash::download(self, part_name, size, &mut reader, &mut progress)
+        flash::download(self, part_name, size, reader, progress)
     }
 
-    fn upload<W, F>(&mut self, part_name: String, mut writer: W, mut progress: F) -> Result<()>
+    fn upload<W, F>(&mut self, part_name: &str, writer: W, progress: F) -> Result<()>
     where
         W: Write + Send,
         F: FnMut(usize, usize) + Send,
     {
-        flash::upload(self, part_name, &mut writer, &mut progress)
+        flash::upload(self, part_name, writer, progress)
     }
 
-    fn format<F>(&mut self, part_name: String, mut progress: F) -> Result<()>
+    fn format<F>(&mut self, part_name: &str, progress: F) -> Result<()>
     where
         F: FnMut(usize, usize) + Send,
     {
-        flash::format(self, part_name, &mut progress)
+        flash::format(self, part_name, progress)
     }
 
     fn get_usb_speed(&mut self) -> Result<u32> {
@@ -369,7 +363,7 @@ impl DownloadProtocol for XFlash {
         for gpt_name in ["PGPT", "SGPT"] {
             let mut data = Vec::new();
 
-            if self.upload(gpt_name.into(), Cursor::new(&mut data), |_, _| {}).is_ok() {
+            if self.upload(gpt_name, Cursor::new(&mut data), |_, _| {}).is_ok() {
                 self.send(&[0u8; 4]).ok();
 
                 if let Ok(gpt) = Gpt::parse(&data) {
@@ -405,21 +399,21 @@ impl DownloadProtocol for XFlash {
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    fn peek<W, F>(&mut self, addr: u32, length: usize, mut writer: W, mut progress: F) -> Result<()>
+    fn peek<W, F>(&mut self, addr: u32, length: usize, writer: W, progress: F) -> Result<()>
     where
         W: Write + Send,
         F: FnMut(usize, usize) + Send,
     {
-        peek(self, addr, length, &mut writer, &mut progress)
+        peek(self, addr, length, writer, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    fn poke<R, F>(&mut self, addr: u32, length: usize, mut reader: R, mut progress: F) -> Result<()>
+    fn poke<R, F>(&mut self, addr: u32, length: usize, reader: R, progress: F) -> Result<()>
     where
         R: Read + Send,
         F: FnMut(usize, usize) + Send,
     {
-        poke(self, addr, length, &mut reader, &mut progress)
+        poke(self, addr, length, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
@@ -428,14 +422,14 @@ impl DownloadProtocol for XFlash {
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        mut writer: W,
-        mut progress: F,
+        writer: W,
+        progress: F,
     ) -> Result<()>
     where
         W: Write + Send,
         F: FnMut(usize, usize) + Send,
     {
-        read_rpmb(self, region, start_sector, sectors_count, &mut writer, &mut progress)
+        read_rpmb(self, region, start_sector, sectors_count, writer, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
@@ -444,14 +438,14 @@ impl DownloadProtocol for XFlash {
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        mut reader: R,
-        mut progress: F,
+        reader: R,
+        progress: F,
     ) -> Result<()>
     where
         R: Read + Send,
         F: FnMut(usize, usize) + Send,
     {
-        write_rpmb(self, region, start_sector, sectors_count, &mut reader, &mut progress)
+        write_rpmb(self, region, start_sector, sectors_count, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]

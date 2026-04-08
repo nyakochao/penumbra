@@ -208,14 +208,10 @@ impl Xml {
     }
 
     /// Sends a file to the device.
-    pub fn download_file<R>(
-        &mut self,
-        size: usize,
-        mut reader: R,
-        progress: &mut (dyn FnMut(usize, usize) + Send),
-    ) -> Result<()>
+    pub fn download_file<R, F>(&mut self, size: usize, mut reader: R, mut progress: F) -> Result<()>
     where
         R: Read,
+        F: FnMut(usize, usize) + Send,
     {
         let resp = self.read_data()?;
         let resp_string = String::from_utf8_lossy(&resp);
@@ -263,12 +259,9 @@ impl Xml {
     }
 
     /// Receives a file from the device.
-    pub fn upload_file<W>(
-        &mut self,
-        mut writer: W,
-        progress: &mut (dyn FnMut(usize, usize) + Send),
-    ) -> Result<bool>
+    pub fn upload_file<W, F>(&mut self, mut writer: W, mut progress: F) -> Result<bool>
     where
+        F: FnMut(usize, usize) + Send,
         W: Write,
     {
         let resp = self.read_data()?;
@@ -322,10 +315,10 @@ impl Xml {
     }
 
     /// Waits for the device to finish a certain operation, reporting progress.
-    pub fn progress_report(
-        &mut self,
-        progress: &mut (dyn FnMut(usize, usize) + Send),
-    ) -> Result<bool> {
+    pub fn progress_report<F>(&mut self, mut progress: F) -> Result<bool>
+    where
+        F: FnMut(usize, usize) + Send,
+    {
         let resp = self.read_data()?;
         let resp_string = String::from_utf8_lossy(&resp);
 
@@ -419,8 +412,8 @@ impl Xml {
         xmlcmd_e!(self, HostSupportedCommands, HOST_CMDS)?;
         // Wait for the device to initialize DRAM
         xmlcmd!(self, NotifyInitHw)?;
-        let mut mock_progress = |_, _| {};
-        self.progress_report(&mut mock_progress)?;
+        let mock_progress = |_, _| {};
+        self.progress_report(mock_progress)?;
         self.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
         xmlcmd_e!(self, SetHostInfo, format!("Penumbra v{}", VERSION))?;
@@ -440,9 +433,9 @@ impl Xml {
     pub fn get_upload_file_resp(&mut self) -> Result<String> {
         let mut buffer = Vec::new();
         let mut writer = BufWriter::new(&mut buffer);
-        let mut progress = |_, _| {};
+        let progress = |_, _| {};
 
-        self.upload_file(&mut writer, &mut progress)?;
+        self.upload_file(&mut writer, progress)?;
         writer.flush()?;
         drop(writer);
 
@@ -468,7 +461,7 @@ impl Xml {
         };
 
         let auth = AuthManager::get();
-        let mut progress = |_, _| {};
+        let progress = |_, _| {};
 
         if !auth.can_sign(&da2_data) {
             #[cfg(not(feature = "no_exploits"))]
@@ -476,7 +469,7 @@ impl Xml {
                 info!("No available signers for DA SLA, trying dummy signature...");
                 let dummy_sig = [0u8; 256];
                 xmlcmd!(self, SecuritySetFlashPolicy, "Penumbra Dummy SLA challenge")?;
-                self.download_file(dummy_sig.len(), dummy_sig.as_slice(), &mut progress)?;
+                self.download_file(dummy_sig.len(), dummy_sig.as_slice(), progress)?;
                 if self.lifetime_ack(XmlCmdLifetime::CmdEnd).is_ok() {
                     info!("DA SLA signature accepted (dummy)!");
                     return Ok(true);
@@ -510,7 +503,7 @@ impl Xml {
         info!("Signed DA SLA challenge. Uploading to device...");
 
         xmlcmd!(self, SecuritySetFlashPolicy, "Penumbra SLA challenge")?;
-        self.download_file(signed_rnd.len(), signed_rnd.as_slice(), &mut progress)?;
+        self.download_file(signed_rnd.len(), signed_rnd.as_slice(), progress)?;
         self.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
         info!("DA SLA signature accepted!");
         Ok(true)

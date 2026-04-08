@@ -13,9 +13,9 @@ pub fn parse_seccfg(xml: &mut Xml) -> Option<SecCfgV4> {
     let progress = |_, _| {};
 
     let mut seccfg_header = Vec::with_capacity(seccfg.size);
-    let mut cursor = Cursor::new(&mut seccfg_header);
+    let cursor = Cursor::new(&mut seccfg_header);
 
-    xml.upload("seccfg".to_string(), &mut cursor, progress).ok()?;
+    xml.upload("seccfg", cursor, progress).ok()?;
 
     // Cut to 200 bytes
     seccfg_header.truncate(200);
@@ -51,9 +51,9 @@ pub fn write_seccfg(xml: &mut Xml, seccfg: &mut SecCfgV4) -> Option<[u8; 512]> {
     let seccfg_data = seccfg.create().ok()?;
 
     let progress = |_, _| {};
-    let mut cursor = Cursor::new(&seccfg_data);
+    let cursor = Cursor::new(&seccfg_data);
 
-    xml.download("seccfg".to_string(), 200, &mut cursor, progress).ok()?;
+    xml.download("seccfg", 200, cursor, progress).ok()?;
 
     Some(seccfg_data)
 }

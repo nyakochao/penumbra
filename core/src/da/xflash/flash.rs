@@ -64,8 +64,8 @@ pub fn write_flash<R, F>(
     xflash: &mut XFlash,
     addr: u64,
     size: usize,
-    reader: R,
     section: PartitionKind,
+    reader: R,
     progress: F,
 ) -> Result<()>
 where
@@ -135,7 +135,7 @@ where
 
 pub fn download<R, F>(
     xflash: &mut XFlash,
-    part_name: String,
+    part_name: &str,
     size: usize,
     reader: R,
     progress: F,
@@ -173,7 +173,7 @@ where
     Ok(())
 }
 
-pub fn upload<W, F>(xflash: &mut XFlash, part_name: String, writer: W, progress: F) -> Result<()>
+pub fn upload<W, F>(xflash: &mut XFlash, part_name: &str, writer: W, progress: F) -> Result<()>
 where
     W: Write + Send,
     F: FnMut(usize, usize) + Send,
@@ -199,13 +199,13 @@ where
     Ok(())
 }
 
-pub fn format<F>(xflash: &mut XFlash, part_name: String, progress: F) -> Result<()>
+pub fn format<F>(xflash: &mut XFlash, part_name: &str, progress: F) -> Result<()>
 where
     F: FnMut(usize, usize) + Send,
 {
     let part = xflash
         .dev_info
-        .get_partition(&part_name)
+        .get_partition(part_name)
         .ok_or(Error::proto(format!("Partition '{}' not found in partition table", part_name)))?;
 
     xflash.send_cmd(Cmd::DeviceCtrl)?;

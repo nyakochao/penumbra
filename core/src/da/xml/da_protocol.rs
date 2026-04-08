@@ -70,8 +70,8 @@ impl DownloadProtocol for Xml {
         xmlcmd_e!(self, HostSupportedCommands, HOST_CMDS).ok();
 
         xmlcmd!(self, NotifyInitHw)?;
-        let mut mock_progress = |_, _| {};
-        self.progress_report(&mut mock_progress)?;
+        let mock_progress = |_, _| {};
+        self.progress_report(mock_progress)?;
         self.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
         self.handle_sla()?;
@@ -86,8 +86,8 @@ impl DownloadProtocol for Xml {
         xmlcmd!(self, BootTo, addr, addr, 0x0u64, data.len() as u64)?;
 
         let reader = BufReader::new(Cursor::new(data));
-        let mut progress = |_, _| {};
-        self.download_file(data.len(), reader, &mut progress)?;
+        let progress = |_, _| {};
+        self.download_file(data.len(), reader, progress)?;
 
         self.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
         Ok(true)
@@ -127,7 +127,7 @@ impl DownloadProtocol for Xml {
     fn shutdown(&mut self) -> Result<()> {
         info!("Shutting down device...");
 
-        xmlcmd_e!(self, Reboot, "IMMEDIATE".to_string())
+        xmlcmd_e!(self, Reboot, "IMMEDIATE")
             .map(|_| ())
             .map_err(|e| Error::proto(format!("Failed to shutdown device: {e}")))
     }
@@ -138,7 +138,7 @@ impl DownloadProtocol for Xml {
             BootMode::Normal | BootMode::HomeScreen => self.shutdown()?,
             mode => {
                 let xml_mode = mode.to_text().unwrap();
-                xmlcmd_e!(self, SetBootMode, xml_mode.to_string(), "USB", "ON", "ON")?;
+                xmlcmd_e!(self, SetBootMode, xml_mode, "USB", "ON", "ON")?;
             }
         }
 
@@ -150,8 +150,8 @@ impl DownloadProtocol for Xml {
         addr: u64,
         size: usize,
         section: PartitionKind,
-        progress: F,
         writer: W,
+        progress: F,
     ) -> Result<()>
     where
         W: Write + Send,
@@ -164,8 +164,8 @@ impl DownloadProtocol for Xml {
         &mut self,
         addr: u64,
         size: usize,
-        reader: R,
         section: PartitionKind,
+        reader: R,
         progress: F,
     ) -> Result<()>
     where
@@ -188,33 +188,27 @@ impl DownloadProtocol for Xml {
         flash::erase_flash(self, addr, size, section, progress)
     }
 
-    fn download<R, F>(
-        &mut self,
-        part_name: String,
-        size: usize,
-        mut reader: R,
-        mut progress: F,
-    ) -> Result<()>
+    fn download<R, F>(&mut self, part_name: &str, size: usize, reader: R, progress: F) -> Result<()>
     where
         R: Read + Send,
         F: FnMut(usize, usize) + Send,
     {
-        flash::download(self, part_name, size, &mut reader, &mut progress)
+        flash::download(self, part_name, size, reader, progress)
     }
 
-    fn upload<W, F>(&mut self, part_name: String, mut writer: W, mut progress: F) -> Result<()>
+    fn upload<W, F>(&mut self, part_name: &str, writer: W, progress: F) -> Result<()>
     where
         W: Write + Send,
         F: FnMut(usize, usize) + Send,
     {
-        flash::upload(self, part_name, &mut writer, &mut progress)
+        flash::upload(self, part_name, writer, progress)
     }
 
-    fn format<F>(&mut self, part_name: String, mut progress: F) -> Result<()>
+    fn format<F>(&mut self, part_name: &str, progress: F) -> Result<()>
     where
         F: FnMut(usize, usize) + Send,
     {
-        flash::format(self, part_name, &mut progress)
+        flash::format(self, part_name, progress)
     }
 
     fn read32(&mut self, _addr: u32) -> Result<u32> {
@@ -267,7 +261,7 @@ impl DownloadProtocol for Xml {
         for gpt_name in ["PGPT", "SGPT"] {
             let mut data = Vec::new();
 
-            if self.upload(gpt_name.into(), Cursor::new(&mut data), |_, _| {}).is_ok()
+            if self.upload(gpt_name, Cursor::new(&mut data), |_, _| {}).is_ok()
                 && let Ok(gpt) = Gpt::parse(&data)
             {
                 let parsed = Gpt::to_partitions(Some(&gpt), &storage);
@@ -301,21 +295,21 @@ impl DownloadProtocol for Xml {
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    fn peek<W, F>(&mut self, addr: u32, length: usize, mut writer: W, mut progress: F) -> Result<()>
+    fn peek<W, F>(&mut self, addr: u32, length: usize, writer: W, progress: F) -> Result<()>
     where
         W: Write + Send,
         F: FnMut(usize, usize) + Send,
     {
-        exts::peek(self, addr, length, &mut writer, &mut progress)
+        exts::peek(self, addr, length, writer, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
-    fn poke<R, F>(&mut self, addr: u32, length: usize, mut reader: R, mut progress: F) -> Result<()>
+    fn poke<R, F>(&mut self, addr: u32, length: usize, reader: R, progress: F) -> Result<()>
     where
         R: Read + Send,
         F: FnMut(usize, usize) + Send,
     {
-        exts::poke(self, addr, length, &mut reader, &mut progress)
+        exts::poke(self, addr, length, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
@@ -324,14 +318,14 @@ impl DownloadProtocol for Xml {
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        mut writer: W,
-        mut progress: F,
+        writer: W,
+        progress: F,
     ) -> Result<()>
     where
         W: Write + Send,
         F: FnMut(usize, usize) + Send,
     {
-        exts::read_rpmb(self, region, start_sector, sectors_count, &mut writer, &mut progress)
+        exts::read_rpmb(self, region, start_sector, sectors_count, writer, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]
@@ -340,14 +334,14 @@ impl DownloadProtocol for Xml {
         region: RpmbRegion,
         start_sector: u32,
         sectors_count: u32,
-        mut reader: R,
-        mut progress: F,
+        reader: R,
+        progress: F,
     ) -> Result<()>
     where
         R: Read + Send,
         F: FnMut(usize, usize) + Send,
     {
-        exts::write_rpmb(self, region, start_sector, sectors_count, &mut reader, &mut progress)
+        exts::write_rpmb(self, region, start_sector, sectors_count, reader, progress)
     }
 
     #[cfg(not(feature = "no_exploits"))]

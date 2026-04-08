@@ -140,8 +140,8 @@ pub trait DownloadProtocol {
         addr: u64,
         size: usize,
         section: PartitionKind,
-        progress: F,
         writer: W,
+        progress: F,
     ) -> Result<()>
     where
         W: Write + Send,
@@ -151,8 +151,8 @@ pub trait DownloadProtocol {
         &mut self,
         addr: u64,
         size: usize,
-        reader: R,
         section: PartitionKind,
+        reader: R,
         progress: F,
     ) -> Result<()>
     where
@@ -171,7 +171,7 @@ pub trait DownloadProtocol {
 
     fn download<R, F>(
         &mut self,
-        part_name: String,
+        part_name: &str,
         size: usize,
         reader: R,
         progress: F,
@@ -180,12 +180,12 @@ pub trait DownloadProtocol {
         R: Read + Send,
         F: FnMut(usize, usize) + Send;
 
-    fn upload<W, F>(&mut self, part_name: String, writer: W, progress: F) -> Result<()>
+    fn upload<W, F>(&mut self, part_name: &str, writer: W, progress: F) -> Result<()>
     where
         W: Write + Send,
         F: FnMut(usize, usize) + Send;
 
-    fn format<F>(&mut self, part_name: String, progress: F) -> Result<()>
+    fn format<F>(&mut self, part_name: &str, progress: F) -> Result<()>
     where
         F: FnMut(usize, usize) + Send;
 

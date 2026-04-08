@@ -29,6 +29,8 @@ pub struct ExtDaCtx {
     sej_base: u32,
     #[xml(tag = "tzcc_base", fmt = "0x{tzcc_base:X}")]
     tzcc_base: u32,
+    #[xml(tag = "ssr_base", fmt = "0x{ssr_base:X}")]
+    ssr_base: u32,
     #[xml(tag = "da2_base", fmt = "0x{da2_base:X}")]
     da2_base: u32,
     #[xml(tag = "da2_size", fmt = "0x{da2_size:X}")]
@@ -151,15 +153,15 @@ pub fn boot_extensions(xml: &mut Xml) -> Result<bool> {
     let da2_size = xml.da.get_da2().map(|da2| da2.data.len() as u32).unwrap_or(0);
     let storage = match xml.get_storage() {
         Some(s) => match s.kind() {
-            StorageType::Emmc => "EMMC".to_string(),
-            StorageType::Ufs => "UFS".to_string(),
-            StorageType::Unknown => "Unknown".to_string(),
+            StorageType::Emmc => "EMMC",
+            StorageType::Ufs => "UFS",
+            StorageType::Unknown => "Unknown",
         },
-        None => "Unknown".to_string(),
+        None => "Unknown",
     };
-    let usb_log = if xml.usb_log_channel { "yes" } else { "no" }.to_string();
+    let usb_log = if xml.usb_log_channel { "yes" } else { "no" };
 
-    xmlcmd_e!(xml, ExtDaCtx, sej_base, tzcc_base, da2_base, da2_size, storage, usb_log)?;
+    xmlcmd_e!(xml, ExtDaCtx, sej_base, tzcc_base, 0u32, da2_base, da2_size, storage, usb_log)?;
 
     info!("Successfully booted XML extensions");
 
@@ -225,38 +227,28 @@ fn prepare_extensions(xml: &Xml) -> Option<Vec<u8>> {
     Some(da_ext_data)
 }
 
-pub fn peek<F>(
-    xml: &mut Xml,
-    addr: u32,
-    length: usize,
-    writer: &mut (dyn Write + Send),
-    mut progress: F,
-) -> Result<()>
+pub fn peek<W, F>(xml: &mut Xml, addr: u32, length: usize, writer: W, progress: F) -> Result<()>
 where
+    W: Write,
     F: FnMut(usize, usize) + Send,
 {
     xmlcmd!(xml, ExtReadMem, addr, length)?;
 
-    xml.upload_file(writer, &mut progress)?;
+    xml.upload_file(writer, progress)?;
 
     xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
     Ok(())
 }
 
-pub fn poke<F>(
-    xml: &mut Xml,
-    addr: u32,
-    length: usize,
-    reader: &mut (dyn Read + Send),
-    mut progress: F,
-) -> Result<()>
+pub fn poke<R, F>(xml: &mut Xml, addr: u32, length: usize, reader: R, progress: F) -> Result<()>
 where
+    R: Read,
     F: FnMut(usize, usize) + Send,
 {
     xmlcmd!(xml, ExtWriteMem, addr, length)?;
 
-    xml.download_file(length, reader, &mut progress)?;
+    xml.download_file(length, reader, progress)?;
 
     xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
@@ -274,18 +266,18 @@ pub fn sej(
     let length = data.len() as u32;
 
     // yes or no
-    let encrypt_str = if encrypt { "yes" } else { "no" }.to_string();
-    let legacy_str = if legacy { "yes" } else { "no" }.to_string();
-    let anti_clone_str = if anti_clone { "yes" } else { "no" }.to_string();
+    let encrypt_str = if encrypt { "yes" } else { "no" };
+    let legacy_str = if legacy { "yes" } else { "no" };
+    let anti_clone_str = if anti_clone { "yes" } else { "no" };
     xmlcmd!(xml, ExtSej, encrypt_str, legacy_str, anti_clone_str, length)?;
 
     let mut buf = data.to_vec();
     let mut cursor = Cursor::new(&mut buf);
-    let mut progress = |_: usize, _: usize| {};
+    let progress = |_: usize, _: usize| {};
 
-    xml.download_file(length as usize, &mut cursor, &mut progress)?;
+    xml.download_file(length as usize, &mut cursor, progress)?;
     cursor.set_position(0);
-    xml.upload_file(&mut cursor, &mut progress)?;
+    xml.upload_file(&mut cursor, progress)?;
 
     xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
@@ -312,7 +304,7 @@ pub fn read_rpmb<W, F>(
     start_sector: u32,
     sectors_count: u32,
     writer: W,
-    mut progress: F,
+    progress: F,
 ) -> Result<()>
 where
     W: Write + Send,
@@ -334,7 +326,7 @@ where
     }
 
     xmlcmd!(xml, ExtRpmbRead, region as u32, start_sector, sectors_count)?;
-    xml.upload_file(writer, &mut progress)?;
+    xml.upload_file(writer, progress)?;
     xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
     Ok(())
@@ -346,7 +338,7 @@ pub fn write_rpmb<R, F>(
     start_sector: u32,
     sectors_count: u32,
     reader: R,
-    mut progress: F,
+    progress: F,
 ) -> Result<()>
 where
     R: Read + Send,
@@ -370,7 +362,7 @@ where
     let data_len = sectors_count as usize * RPMB_FRAME_DATA_SZ;
 
     xmlcmd!(xml, ExtRpmbWrite, region as u32, start_sector, sectors_count)?;
-    xml.download_file(data_len, reader, &mut progress)?;
+    xml.download_file(data_len, reader, progress)?;
     xml.lifetime_ack(XmlCmdLifetime::CmdEnd)?;
 
     Ok(())
