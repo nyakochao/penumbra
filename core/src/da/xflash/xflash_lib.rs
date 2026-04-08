@@ -410,7 +410,7 @@ impl XFlash {
             #[cfg(not(feature = "no_exploits"))]
             {
                 info!("No available signers for DA SLA, trying dummy signature...");
-                let dummy_sig = vec![0u8; 256];
+                let dummy_sig = [0u8; 256];
                 if self.devctrl(Cmd::SetRemoteSecPolicy, Some(&[&dummy_sig])).is_ok() {
                     info!("DA SLA signature accepted (dummy)!");
                     return Ok(true);

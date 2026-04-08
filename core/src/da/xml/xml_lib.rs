@@ -2,7 +2,7 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Read, Write};
 
 use log::{debug, error, info, trace, warn};
 
@@ -215,7 +215,7 @@ impl Xml {
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<()>
     where
-        R: std::io::Read,
+        R: Read,
     {
         let resp = self.read_data()?;
         let resp_string = String::from_utf8_lossy(&resp);
@@ -269,7 +269,7 @@ impl Xml {
         progress: &mut (dyn FnMut(usize, usize) + Send),
     ) -> Result<bool>
     where
-        W: std::io::Write,
+        W: Write,
     {
         let resp = self.read_data()?;
         let resp_string = String::from_utf8_lossy(&resp);
@@ -474,7 +474,7 @@ impl Xml {
             #[cfg(not(feature = "no_exploits"))]
             {
                 info!("No available signers for DA SLA, trying dummy signature...");
-                let dummy_sig = vec![0u8; 256];
+                let dummy_sig = [0u8; 256];
                 xmlcmd!(self, SecuritySetFlashPolicy, "Penumbra Dummy SLA challenge")?;
                 self.download_file(dummy_sig.len(), dummy_sig.as_slice(), &mut progress)?;
                 if self.lifetime_ack(XmlCmdLifetime::CmdEnd).is_ok() {
