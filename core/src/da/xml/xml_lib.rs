@@ -3,6 +3,7 @@
     SPDX-FileCopyrightText: 2025 Shomy
 */
 use std::io::{BufWriter, Read, Write};
+use std::time::Duration;
 
 use log::{debug, error, info, trace, warn};
 
@@ -332,6 +333,11 @@ impl Xml {
 
         self.ack(None)?;
 
+        // Progress report might make the device delay a bit during USB
+        // transfers. As a solution, we increase the port timeout
+        // while we're waiting for the progress report, and restore it afterwards.
+        self.conn.port.set_timeout(Some(Duration::from_secs(3)))?;
+
         let mut resp: Vec<u8> = Vec::new();
         while resp != b"OK!EOT\0" {
             resp = self.read_data()?;
@@ -356,6 +362,7 @@ impl Xml {
         }
 
         progress(100, 100);
+        self.conn.port.set_timeout(None)?;
 
         Ok(true)
     }
