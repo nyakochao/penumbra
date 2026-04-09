@@ -10,6 +10,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Preloader/Brom error: {0}")]
+    BrPl(#[from] BrPlError),
     /// An error related to XFlash protocol (and its error codes)
     #[error("XFlash error: {0}")]
     XFlash(#[from] XFlashError),
@@ -585,5 +587,40 @@ impl XmlError {
             "ERR!CANCEL" => XmlError::new("Cancelled", XmlErrorKind::Cancel),
             _ => XmlError::new(msg, XmlErrorKind::UnsupportedCmd),
         }
+    }
+}
+
+// BROM / Preloader errors
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Error, IntoPrimitive, TryFromPrimitive)]
+#[repr(u16)]
+pub enum BrPlErrorKind {
+    #[error("SEC: SLA challenge not completed. SLA must be completed before any proceeding")]
+    SlaNotPassed = 0x1D0D,
+    #[error("SEC: This command can be executed only once")]
+    CmdExecMoreThanOnce = 0x1D0C,
+    #[error("SEC: DA list max entries reached")]
+    DaListMaxEntriesReached = 0x1D10,
+    #[error("SEC: DAA signature error")]
+    DaaSigError = 0x7015,
+    #[error("SEC: An auth file is needed to continue")]
+    ToolAuthIsNull = 0x7017,
+    #[error("SEC: DAA signature verification failed")]
+    DaaSigVfyFailed = 0x7024,
+
+    #[error("Unknown error")]
+    Unknown = 0xFFFF,
+}
+
+#[derive(Debug, Error)]
+#[error("{kind} (code: {code:#06x})")]
+pub struct BrPlError {
+    pub kind: BrPlErrorKind,
+    pub code: u16,
+}
+
+impl BrPlError {
+    pub fn from_code(code: u16) -> Self {
+        let kind = BrPlErrorKind::try_from(code).unwrap_or(BrPlErrorKind::Unknown);
+        Self { kind, code }
     }
 }

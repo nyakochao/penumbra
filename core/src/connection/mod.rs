@@ -2,6 +2,8 @@
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: 2025 Shomy
 */
+#[macro_use]
+mod macros;
 mod backend;
 mod command;
 pub mod port;
@@ -93,11 +95,7 @@ impl Connection {
         self.echo(&[Command::JumpDa as u8], 1)?;
         self.echo(&address.to_be_bytes(), 4)?;
 
-        let status = self.read_u16_le()?;
-        if status != 0 {
-            error!("JumpDA failed with status: {:04X}", status);
-            return Err(Error::conn("JumpDA failed"));
-        }
+        status_ok!(self);
 
         Ok(())
     }
@@ -115,27 +113,17 @@ impl Connection {
         self.echo(&(da_len).to_be_bytes(), 4)?;
         self.echo(&sig_len.to_be_bytes(), 4)?;
 
-        let status = self.read_u16_be()?;
-        debug!("Received status: 0x{:04X}", status);
+        status_ok!(self);
 
-        if status != 0 {
-            error!("SendDA command failed with status: {:04X}", status);
-            return Err(Error::conn("SendDA command failed"));
-        }
-
-        self.port.write_all(da_data)?;
+        self.write(da_data)?;
 
         debug!("DA sent!");
 
         let checksum = self.read_u16_be()?;
         debug!("Received checksum: 0x{:04X}", checksum);
 
-        let status = self.read_u16_be()?;
-        debug!("Received final status: 0x{:04X}", status);
-        if status != 0 {
-            error!("SendDA data transfer failed with status: {:04X}", status);
-            return Err(Error::conn("SendDA data transfer failed"));
-        }
+        status_ok!(self);
+
 
         Ok(())
     }
@@ -144,12 +132,7 @@ impl Connection {
         self.echo(&[Command::GetHwCode as u8], 1)?;
 
         let hw_code = self.read_u16_be()?;
-        let status = self.read_u16_le()?;
-
-        if status != 0 {
-            error!("GetHwCode failed with status: {:04X}", status);
-            return Err(Error::conn("GetHwCode failed"));
-        }
+        status_ok!(self);
 
         Ok(hw_code)
     }
@@ -160,12 +143,7 @@ impl Connection {
         let hw_sub_code = self.read_u16_le()?;
         let hw_ver = self.read_u16_le()?;
         let sw_ver = self.read_u16_le()?;
-        let status = self.read_u16_le()?;
-
-        if status != 0 {
-            error!("GetHwSwVer failed with status: 0x{:04X}", status);
-            return Err(Error::conn("GetHwSwVer failed"));
-        }
+        status_ok!(self);
 
         Ok((hw_sub_code, hw_ver, sw_ver))
     }
@@ -181,22 +159,17 @@ impl Connection {
             return Err(Error::conn("Invalid SoC ID length"));
         }
 
-        self.port.read_exact(&mut soc_id)?;
+        self.read(&mut soc_id)?;
 
-        let status = self.read_u16_le()?;
-
-        if status != 0 {
-            error!("GetSocId failed with status: 0x{:04X}", status);
-            return Err(Error::conn("GetSocId failed"));
-        }
+        status_ok!(self);
 
         Ok(soc_id)
     }
 
     pub fn get_meid(&mut self) -> Result<[u8; 16]> {
-        self.port.write_all(&[Command::GetMeId as u8])?;
+        self.write(&[Command::GetMeId as u8])?;
         let mut echo = [0u8; 1];
-        self.port.read_exact(&mut echo)?;
+        self.read(&mut echo)?;
 
         let mut meid = [0u8; 16];
 
@@ -221,14 +194,9 @@ impl Connection {
             return Err(Error::conn("Invalid MEID length"));
         }
 
-        self.port.read_exact(&mut meid)?;
+        self.read(&mut meid)?;
 
-        let status = self.read_u16_le()?;
-
-        if status != 0 {
-            error!("GetMeid failed with status: 0x{:04X}", status);
-            return Err(Error::conn("GetMeid failed"));
-        }
+        status_ok!(self);
 
         Ok(meid)
     }
@@ -243,12 +211,7 @@ impl Connection {
         self.echo(&[Command::GetTargetConfig as u8], 1)?;
 
         let config = self.read_u32_be()?;
-        let status = self.read_u16_le()?;
-
-        if status != 0 {
-            error!("GetTargetConfig failed with status: 0x{:04X}", status);
-            return Err(Error::conn("GetTargetConfig failed"));
-        }
+        status_ok!(self);
 
         Ok(config)
     }
@@ -270,20 +233,14 @@ impl Connection {
         self.echo(&address.to_be_bytes(), 4)?;
         self.echo(&((aligned / 4) as u32).to_be_bytes(), 4)?;
 
-        let status = self.read_u16_be()?;
-        if status != 0 {
-            return Err(Error::conn(format!("Read32 failed with status: 0x{:04X}", status)));
-        }
+        status_ok!(self);
 
         let mut data = vec![0u8; aligned];
         for chunk in data.chunks_mut(4) {
-            self.port.read_exact(chunk)?;
+            self.read(chunk)?;
         }
 
-        let status = self.read_u16_be()?;
-        if status != 0 {
-            return Err(Error::conn(format!("Read32 failed with status: 0x{:04X}", status)));
-        }
+        status_ok!(self);
 
         data.truncate(size);
         Ok(data)
