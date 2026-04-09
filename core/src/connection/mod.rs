@@ -124,7 +124,25 @@ impl Connection {
 
         status_ok!(self);
 
+        Ok(())
+    }
 
+    pub fn send_auth(&mut self, data: &[u8]) -> Result<()> {
+        self.echo(&[Command::SendAuth as u8], 1)?;
+
+        let len = data.len() as u32;
+        self.echo(&len.to_be_bytes(), 4)?;
+
+        status_ok!(self);
+
+        self.write(data)?;
+
+        // Checksum
+        self.read_u16_be()?;
+
+        status_ok!(self);
+
+        info!("Auth sent successfully!");
         Ok(())
     }
 
