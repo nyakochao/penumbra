@@ -8,6 +8,8 @@ mod backend;
 mod command;
 pub mod port;
 
+use std::time::Duration;
+
 use log::{debug, error, info};
 
 use crate::connection::command::Command;
@@ -84,7 +86,9 @@ impl Connection {
 
     pub fn handshake(&mut self) -> Result<()> {
         info!("Starting handshake...");
+        self.port.set_timeout(Some(Duration::from_secs(3)))?;
         self.port.handshake()?;
+        self.port.set_timeout(None)?;
         info!("Handshake completed!");
         Ok(())
     }
