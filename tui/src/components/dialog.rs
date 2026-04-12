@@ -1,7 +1,7 @@
 /*
     SPDX-License-Identifier: AGPL-3.0-or-later
-    SPDX-FileCopyrightText: 2025 DiabloSat
-    SPDX-FileCopyrightText: 2025 Shomy
+    SPDX-FileCopyrightText: 2025-2026 DiabloSat
+    SPDX-FileCopyrightText: 2025-2026 Shomy
 */
 use derive_builder::Builder;
 use ratatui::prelude::*;

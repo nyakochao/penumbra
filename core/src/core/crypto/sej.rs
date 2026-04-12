@@ -1,6 +1,6 @@
 /*
     SPDX-License-Identifier: GPL-3.0-or-later
-    SPDX-FileCopyrightText: 2025 Shomy
+    SPDX-FileCopyrightText: 2025-2026 Shomy
 
     Derived from:
     https://github.com/bkerler/mtkclient/blob/main/mtkclient/Library/Hardware/hwcrypto_sej.py
