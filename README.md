@@ -77,6 +77,7 @@ If so, you can open an issue attaching debug logs.<br>
 To get debug logs, run `antumbra` with the `-v` flag. A file called `antumbra.log` will be created in the current directory.
 This will also enable UART debug logging. If possible, attach UART logs too.
 If you don't have UART, you can use the `--usb-log` flag in `antumbra` to enable DA logging over USB.
+A file called `da.log` will be created in the current directory with the logs.
 
 > [!NOTE]
 > Penumbra currently supports both V5 (XFlash) and V6 (XML) devices. Issues reporting incompatibility with other chipset will be ignored until broader support is added.
