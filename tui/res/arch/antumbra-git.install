@@ -1,0 +1,30 @@
+post_install() {
+    # Create the udev rule
+    echo "SUBSYSTEM==\"usb\", ATTR{idVendor}==\"0e8d\", MODE=\"0666\", GROUP=\"uucp\"" > /etc/udev/rules.d/80-mediatek.rules
+
+    # Reload udev to apply changes immediately
+    udevadm control --reload-rules && udevadm trigger
+
+
+    echo -e "\n--- Antumbra Installation Notes ---"
+    echo "Created /etc/udev/rules.d/80-mediatek.rules to allow non-root access and reloaded rules."
+    echo "Ensure your user is in the 'uucp' (or dialout) group:"
+    echo "   sudo usermod -aG uucp \$USER"
+    echo -e "------------------------------------\n"
+}
+
+post_upgrade() {
+    post_install
+}
+
+post_remove() {
+    # Remove the rule file we created
+    if [ -f /etc/udev/rules.d/80-mediatek.rules ]; then
+        rm /etc/udev/rules.d/80-mediatek.rules
+        echo -e "\nRemoved udev rule: /etc/udev/rules.d/80-mediatek.rules"
+    fi
+
+    # Refresh udev so the system "forgets" the rule
+    udevadm control --reload-rules && udevadm trigger
+    echo -e "Reloaded udev rules.\n"
+}

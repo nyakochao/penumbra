@@ -1,0 +1,53 @@
+# PKGBUILD by hexman1999 (https://github.com/hexman1999)
+pkgname=antumbra-git
+pkgver=1.0.0.r64.gadc4dec
+pkgrel=1
+pkgdesc="🌘 MTK flash tool written in rust"
+arch=('x86_64' 'aarch64')
+url="https://github.com/shomykohai/penumbra"
+license=('AGPL3-or-later')
+depends=('gcc-libs' 'sh' 'systemd-libs')
+makedepends=('cargo' 'git' 'cmake' 'pkg-config')
+install="antumbra-git.install"
+provides=("${pkgname%-git}")
+conflicts=("${pkgname%-git}")
+
+source=("penumbra::git+https://github.com/shomykohai/penumbra.git")
+sha256sums=('SKIP')
+
+
+# TUI
+# Set to 'true' to build the TUI, 'false' for CLI only.
+# Note: The TUI is currently impossible to build due to ongoing
+# refactoring, so don't set this to true yet.
+_build_tui=false
+
+pkgver() {
+  cd "$srcdir/penumbra"
+  git describe --long --tags | sed 's/\([^-]*-g\)/r\1/;s/-/./g' | sed 's/^v//'
+}
+
+prepare() {
+  cd "$srcdir/penumbra"
+  export CARGO_HOME="$srcdir/cargo-home"
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$srcdir/penumbra"
+  export CARGO_HOME="$srcdir/cargo-home"
+
+  local _features=""
+  [[ "$_build_tui" == "true" ]] && _features="--features tui"
+
+  cargo build --release $_features --frozen
+}
+
+package() {
+  cd "$srcdir/penumbra"
+
+  install -Dm755 "target/release/antumbra" "$pkgdir/usr/bin/antumbra"
+
+  install -Dm644 "README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
