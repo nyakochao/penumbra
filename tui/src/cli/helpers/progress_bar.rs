@@ -42,4 +42,18 @@ impl AntumbraProgress {
     pub fn abandon(&self, msg: &str) {
         self.pb.abandon_with_message(msg.to_string());
     }
+
+    pub fn get_callback<'a>(
+        &'a self,
+        running_msg: &'a str,
+        finished_msg: &'a str,
+    ) -> impl FnMut(usize, usize) + 'a {
+        move |written: usize, total: usize| {
+            self.update(written as u64, running_msg);
+
+            if written >= total {
+                self.finish(finished_msg);
+            }
+        }
+    }
 }
