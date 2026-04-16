@@ -247,6 +247,7 @@ impl Device {
             ConnectionType::Preloader | ConnectionType::Brom => {
                 // If we already are in preloader/brom mode, just handshake again
                 conn.handshake()?;
+                self.connection = Some(conn);
             }
             ConnectionType::Da => {
                 self.protocol = Some(self.init_da_protocol(conn)?);
