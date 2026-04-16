@@ -91,16 +91,9 @@ impl DeviceInfo {
             return Some(p.clone());
         }
 
-        log::info!("Partition '{}' not found, trying with bootctrl suffix", name);
-
-        let Some(suffix) = self.get_bootctrl()?.get_current_suffix().map(|s| s.to_string()) else {
-            log::error!("BOOTCTRL OR SUFFIX IS NONE");
-            return None;
-        };
+        let suffix = self.get_bootctrl()?.get_current_suffix().map(|s| s.to_string())?;
 
         let suffixed_name = format!("{name}{suffix}");
-
-        log::info!("Trying to find partition with suffixed name '{}'", suffixed_name);
 
         data.partitions.iter().find(|p| p.name.eq_ignore_ascii_case(&suffixed_name)).cloned()
     }
